@@ -1,0 +1,10 @@
+{
+  "name": "agent-trap-scan",
+  "version": "0.1.0",
+  "description": "Flags risky text aimed at AI agents (download-and-run commands, hook bypasses, fake system prompts, trap files, honeypots) in repositories you open, clone or read, and reports their AI policy.",
+  "author": { "name": "Wei-Lun Li", "url": "https://github.com/b84330808" },
+  "repository": "https://github.com/b84330808/agent-trap-scan",
+  "homepage": "https://github.com/b84330808/agent-trap-scan#readme",
+  "license": "MIT",
+  "keywords": ["security", "prompt-injection", "agents-md", "open-source", "hooks"]
+}

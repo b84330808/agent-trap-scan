@@ -1,0 +1,343 @@
+{
+  "description": "agent-trap-scan: flag risky text aimed at AI agents in repositories you open, clone or read",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning this repository for agent traps"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Read(//**/AGENTS.md)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/AGENT.md)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/CLAUDE.md)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/CLAUDE.local.md)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/GEMINI.md)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/SKILL.md)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/CONTRIBUTING*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/contributing*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/AI_POLICY*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/SECURITY.md)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/README*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/.cursorrules)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/.windsurfrules)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/.clinerules)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/.mcp.json)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/copilot-instructions.md)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/llms.txt)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/*_TEMPLATE*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/*_template*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/ISSUE_TEMPLATE/**)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/.claude/**)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/.cursor/**)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "if": "Read(//**/.github/instructions/**)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git clone *)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "Bash(git -C * clone *)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "Bash(gh repo clone *)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "Bash(*AGENTS.md*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "Bash(*CLAUDE.md*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "Bash(*GEMINI.md*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "Bash(*SKILL.md*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "Bash(*CONTRIBUTING*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "Bash(*copilot-instructions*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "Bash(*.cursorrules*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "Bash(*PULL_REQUEST_TEMPLATE*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "Bash(*pull_request_template*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          }
+        ]
+      },
+      {
+        "matcher": "PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "PowerShell(git clone *)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "PowerShell(git -C * clone *)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "PowerShell(gh repo clone *)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "PowerShell(*AGENTS.md*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "PowerShell(*CLAUDE.md*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "PowerShell(*GEMINI.md*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "PowerShell(*SKILL.md*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "PowerShell(*CONTRIBUTING*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "PowerShell(*copilot-instructions*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "PowerShell(*.cursorrules*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "PowerShell(*PULL_REQUEST_TEMPLATE*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          },
+          {
+            "type": "command",
+            "if": "PowerShell(*pull_request_template*)",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agent-trap-scan.mjs\" hook",
+            "timeout": 30,
+            "statusMessage": "Scanning for agent traps"
+          }
+        ]
+      }
+    ]
+  }
+}

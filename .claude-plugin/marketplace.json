@@ -1,0 +1,12 @@
+{
+  "name": "agent-trap-scan",
+  "owner": { "name": "Wei-Lun Li", "url": "https://github.com/b84330808" },
+  "description": "Scan repositories for risky text aimed at AI coding agents before your agent acts on it.",
+  "plugins": [
+    {
+      "name": "agent-trap-scan",
+      "source": "./",
+      "description": "Flags risky text aimed at AI agents in repositories you open, clone or read, and reports their AI policy."
+    }
+  ]
+}

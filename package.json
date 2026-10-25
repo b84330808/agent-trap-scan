@@ -1,0 +1,54 @@
+{
+  "name": "agent-trap-scan",
+  "version": "0.1.0",
+  "description": "Scan a repository for text aimed at AI coding agents (AGENTS.md, CLAUDE.md, .claude/, .cursor/, CONTRIBUTING, templates, hidden comments) and flag the risky parts before your agent reads them: download-and-run commands, hook bypasses, fake system prompts, trap files, engagement farming. CLI and Claude Code plugin.",
+  "keywords": [
+    "ai-agents",
+    "prompt-injection",
+    "agents-md",
+    "claude-code",
+    "security",
+    "scanner",
+    "open-source",
+    "cli"
+  ],
+  "license": "MIT",
+  "author": "Wei-Lun Li (https://github.com/b84330808)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/b84330808/agent-trap-scan.git"
+  },
+  "type": "module",
+  "bin": {
+    "agent-trap-scan": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "start": "node src/cli.ts",
+    "bundle": "node scripts/bundle.ts",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}
