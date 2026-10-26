@@ -1,12 +1,11 @@
 // Collects the agent-facing files of a GitHub repository without cloning it:
 // one tree listing through the API, then raw file downloads.
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { decodeText } from "../decode.ts";
+import { runTool } from "../exec.ts";
 import { classifyPath } from "../surface.ts";
 import type { SourceFile } from "../types.ts";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_FILES, type CollectOptions } from "./local.ts";
 
-const execFileAsync = promisify(execFile);
 
 export interface GitHubTarget {
   owner: string;
@@ -19,6 +18,7 @@ export type Fetcher = (url: string, init: { headers: Record<string, string> }) =
   status: number;
   json(): Promise<unknown>;
   text(): Promise<string>;
+  arrayBuffer(): Promise<ArrayBuffer>;
 }>;
 
 export interface GitHubOptions extends CollectOptions {
@@ -71,7 +71,7 @@ export async function resolveToken(env: NodeJS.ProcessEnv = process.env): Promis
   const fromEnv = env.GITHUB_TOKEN || env.GH_TOKEN;
   if (fromEnv) return fromEnv.trim();
   try {
-    const { stdout } = await execFileAsync("gh", ["auth", "token"], { timeout: 10_000, windowsHide: true });
+    const stdout = await runTool("gh", ["auth", "token"], { timeout: 10_000 });
     return stdout.trim() || null;
   } catch {
     return null;
@@ -171,20 +171,19 @@ export async function collectGitHub(target: GitHubTarget, options: GitHubOptions
     for (let next = queue.shift(); next; next = queue.shift()) {
       const kind = classifyPath(next.path);
       if (!kind) continue;
-      if (next.size !== undefined && next.size > maxBytes) {
-        warnings.push(`skipped ${next.path}: ${next.size} bytes is over the ${maxBytes}-byte limit`);
-        continue;
-      }
       try {
-        const res = await doFetch(`${raw}/${repoPath}/${commit}/${encodePath(next.path)}`, { headers: rawHeaders });
+        // A file over the limit is still scanned, from its beginning, and noted.
+        const big = next.size !== undefined && next.size > maxBytes;
+        const headers = big ? { ...rawHeaders, range: `bytes=0-${maxBytes - 1}` } : rawHeaders;
+        const res = await doFetch(`${raw}/${repoPath}/${commit}/${encodePath(next.path)}`, { headers });
         if (res.status === 404) continue;
         if (!res.ok) {
           warnings.push(`could not download ${next.path} (${res.status})`);
           continue;
         }
-        const text = await res.text();
-        if (text.length > maxBytes || text.slice(0, 8000).includes("\u0000")) continue;
-        files.push({ path: next.path, text, kind, url: `https://github.com/${repoPath}/blob/${commit}/${encodePath(next.path)}` });
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        const { text, notes } = decodeText(bytes, maxBytes, Math.max(next.size ?? 0, bytes.length));
+        files.push({ path: next.path, text, kind, url: `https://github.com/${repoPath}/blob/${commit}/${encodePath(next.path)}`, ...(notes.length ? { notes } : {}) });
       } catch (err) {
         warnings.push(`could not download ${next.path}: ${(err as Error).message}`);
       }

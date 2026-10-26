@@ -60,6 +60,8 @@ export interface SourceFile {
   kind: FileKind;
   /** Web link to the file, when it came from GitHub. */
   url?: string;
+  /** Problems reading the file that a reader should know about. */
+  notes?: Array<"truncated" | "nul-bytes">;
 }
 
 export interface Finding {

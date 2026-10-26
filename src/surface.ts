@@ -1,27 +1,29 @@
 // Which files in a repository an AI coding agent is likely to read, and what kind each one is.
 import type { FileKind } from "./types.ts";
 
-/** Files written for agents, matched on the lower-cased base name, at any depth. */
-const AGENT_NAMES = new Set([
-  "agents.md",
-  "agent.md",
-  "claude.md",
-  "claude.local.md",
-  "gemini.md",
-  "skill.md",
+/** Files written for agents, at any depth (matched without regard to case). */
+export const AGENT_FILE_NAMES = [
+  "AGENTS.md",
+  "AGENT.md",
+  "CLAUDE.md",
+  "CLAUDE.local.md",
+  "GEMINI.md",
+  "SKILL.md",
   "copilot-instructions.md",
   ".cursorrules",
   ".windsurfrules",
   ".clinerules",
   ".goosehints",
   ".mcp.json",
-]);
+] as const;
+const AGENT_NAMES = new Set<string>(AGENT_FILE_NAMES.map((n) => n.toLowerCase()));
 
 /** Files written for agents that only count near the top of the tree. */
-const SHALLOW_AGENT_NAMES = new Set(["llms.txt", "llms-full.txt"]);
+export const SHALLOW_AGENT_FILE_NAMES = ["llms.txt", "llms-full.txt"] as const;
+const SHALLOW_AGENT_NAMES = new Set<string>(SHALLOW_AGENT_FILE_NAMES);
 
 /** Directories whose whole content is agent configuration or instructions. */
-const AGENT_DIRS = new Set([
+export const AGENT_DIR_NAMES = [
   ".claude",
   ".cursor",
   ".agents",
@@ -34,13 +36,16 @@ const AGENT_DIRS = new Set([
   ".kiro",
   ".continue",
   ".amazonq",
-]);
+] as const;
+const AGENT_DIRS = new Set<string>(AGENT_DIR_NAMES);
 
 /** Agent folders that live under .github/. */
-const GITHUB_AGENT_DIRS = new Set(["instructions", "prompts", "agents", "chatmodes", "copilot"]);
+export const GITHUB_AGENT_DIR_NAMES = ["instructions", "prompts", "agents", "chatmodes", "copilot"] as const;
+const GITHUB_AGENT_DIRS = new Set<string>(GITHUB_AGENT_DIR_NAMES);
 
 /** Editor settings that can carry agent instructions or auto-approve agent actions. */
-const AGENT_CONFIG_PATHS = new Set([".vscode/mcp.json", ".vscode/settings.json"]);
+export const AGENT_CONFIG_FILE_PATHS = [".vscode/mcp.json", ".vscode/settings.json"] as const;
+const AGENT_CONFIG_PATHS = new Set<string>(AGENT_CONFIG_FILE_PATHS);
 
 const TEXT_EXT = /\.(md|mdx|markdown|mdc|rst|txt|adoc)$/i;
 const CONFIG_EXT = /\.(json|jsonc|ya?ml|toml)$/i;

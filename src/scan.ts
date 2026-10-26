@@ -8,12 +8,26 @@ import { findInvisible, revealInvisible } from "./unicode.ts";
 export interface ScanOptions {
   /** Rule ids to skip. */
   ignore?: readonly string[];
+  /** Stop starting new files after this time (epoch milliseconds). */
+  deadline?: number;
+}
+
+export interface ScanResult {
+  findings: Finding[];
+  /** Files left unscanned because the deadline passed. */
+  unscanned: string[];
 }
 
 /** Policy statements tend to repeat; report the first few per file and rule. */
 const MAX_INFO_PER_RULE = 2;
 
 const EXCERPT_MAX = 180;
+
+/** Repository text placed in a report: invisible and control characters shown as \u{…}, whitespace flattened. */
+export function clean(s: string, max = 300): string {
+  const flat = s.replace(/[\t\n\r\f\v\u2028\u2029]+/g, " ").replace(/ {2,}/g, " ").trim();
+  return revealInvisible(flat.length > max ? `${flat.slice(0, max - 1)}…` : flat);
+}
 
 function excerptOf(line: string, column: number): string {
   let s = line;
@@ -28,30 +42,66 @@ function excerptOf(line: string, column: number): string {
   return revealInvisible(s);
 }
 
-function lineText(source: string, a: Analysis, index: number): string {
-  const start = a.lineStarts[index]!;
-  const next = a.lineStarts[index + 1];
-  return source.slice(start, next === undefined ? source.length : next - 1);
+/** Lines of one view of a file, sliced once each: a long line can hold thousands of matches. */
+class Lines {
+  readonly #cache = new Map<number, string>();
+  readonly #source: string;
+  readonly #starts: number[];
+  constructor(source: string, a: Analysis) {
+    this.#source = source;
+    this.#starts = a.lineStarts;
+  }
+  get(index: number): string {
+    let line = this.#cache.get(index);
+    if (line === undefined) {
+      const start = this.#starts[index]!;
+      const next = this.#starts[index + 1];
+      line = this.#source.slice(start, next === undefined ? this.#source.length : next - 1);
+      this.#cache.set(index, line);
+    }
+    return line;
+  }
 }
 
-const CLAUSE_BREAK = /[.;!?,]\s|[([]|\s[-–—]\s|^\s*(?:[-*+>]|\d+[.)])\s/g;
+const CLAUSE_BREAK = /[.;:!?,]\s|[([]|\s[-–—]\s|^\s*(?:[-*+>]|\d+[.)])\s/g;
+/** How far back from a match to look for the start of its clause. */
+const CLAUSE_WINDOW = 300;
 
-/** The part of the line from the last clause break up to the match. */
-function clauseBefore(line: string, column: number): string {
-  const before = line.slice(0, column);
-  let cut = 0;
-  for (const m of before.matchAll(CLAUSE_BREAK)) cut = m.index + m[0].length;
-  return before.slice(cut);
+/** The clause the match sits in (up to the match), and the clause before it when a colon separates them. */
+function clausesBefore(line: string, column: number): { clause: string; leadIn: string | null } {
+  const from = Math.max(0, column - CLAUSE_WINDOW);
+  const before = line.slice(from, column);
+  const cuts: Array<{ at: number; end: number; colon: boolean }> = [];
+  for (const m of before.matchAll(CLAUSE_BREAK)) cuts.push({ at: m.index, end: m.index + m[0].length, colon: m[0][0] === ":" });
+  const last = cuts[cuts.length - 1];
+  if (!last) return { clause: before, leadIn: null };
+  const prev = cuts[cuts.length - 2];
+  return { clause: before.slice(last.end), leadIn: last.colon ? before.slice(prev ? prev.end : 0, last.at) : null };
 }
 
-/** "Never run this:" followed by a code block or list: the lead-in negates what follows. */
-function negatedByLeadIn(source: string, a: Analysis, index: number): boolean {
+/** Negation words that do not negate what follows: "don't forget to", "not optional", "no exceptions". */
+const NOT_A_NEGATION =
+  /\b(?:don'?t|do\s+not|never|not|no)\s+(?:forget|hesitate|fail|miss|skip|ignore|worry|exceptions?|excuses?|optional|matter)\b|\bnot\s+(?:optional|negotiable)\b|\bwithout\s+(?:fail|exception)\b|\bno\s+matter\b/i;
+
+/** True when the clause ends with a negation of what comes next ("Never use", "Do not skip", "Avoid `git commit"). */
+function negates(clause: string): boolean {
+  if (NOT_A_NEGATION.test(clause)) return false;
+  const words = clause.trim().split(/\s+/);
+  return NEGATION.test(words.slice(-5).join(" "));
+}
+
+/** "Never run this:" on the line before a code block or list negates what follows. */
+function negatedByLeadIn(lines: Lines, index: number): boolean {
   let seen = 0;
   for (let i = index - 1; i >= 0 && seen < 4; i--) {
-    const t = lineText(source, a, i).trim();
+    const t = lines.get(i).trim();
     if (!t || /^(`{3,}|~{3,})/.test(t)) continue;
     seen++;
-    if (/:\s*$/.test(t)) return NEGATION.test(t);
+    if (/:\s*$/.test(t)) {
+      const leadIn = t.replace(/:\s*$/, "");
+      const lastClause = leadIn.split(/[.;!?]\s/).pop() ?? leadIn;
+      return negates(lastClause);
+    }
     if (!/^([-*+]|\d+[.)])\s|^\$|^>/.test(t)) return false;
   }
   return false;
@@ -74,22 +124,26 @@ function addressOf(body: string): Address {
   return agentWord.test(body) && imperative.test(body) ? "loose" : null;
 }
 
-function ruleHits(file: SourceFile, a: Analysis, rule: Rule, regionAddress: Address[]): Hit[] {
+function ruleHits(file: SourceFile, a: Analysis, rule: Rule, regionAddress: Address[], original: Lines): Hit[] {
   const hits: Hit[] = [];
   const views: Array<[string, boolean]> = [[a.visible, false]];
   if (a.hiddenRegions.length) views.push([a.hidden, true]);
   for (const [source, isHidden] of views) {
+    const lines = new Lines(source, a);
+    // One hit per line is enough; the rest of a long line is not re-examined.
+    const done = new Set<number>();
     for (const pattern of rule.patterns) {
       pattern.lastIndex = 0;
       for (const m of source.matchAll(pattern)) {
         const index = lineIndexAt(a.lineStarts, m.index);
-        const line = lineText(source, a, index);
+        if (done.has(index)) continue;
+        const line = lines.get(index);
         const column = m.index - a.lineStarts[index]!;
         if (rule.context && !rule.context.some((re) => re.test(line))) continue;
         if (rule.unlessLine?.test(line)) continue;
         if (rule.filter && !rule.filter(m[0])) continue;
-        const clause = clauseBefore(line, column);
-        if (rule.negatable !== false && (NEGATION.test(clause) || negatedByLeadIn(source, a, index))) continue;
+        const { clause, leadIn } = clausesBefore(line, column);
+        if (rule.negatable !== false && (negates(clause) || (leadIn !== null && negates(leadIn)) || negatedByLeadIn(lines, index))) continue;
         if (rule.unlessBefore?.test(clause)) continue;
 
         let scope: Scope;
@@ -109,7 +163,8 @@ function ruleHits(file: SourceFile, a: Analysis, rule: Rule, regionAddress: Addr
         }
         // In a hidden comment that nobody addressed to agents, a template's notes to humans are normal.
         if (isHidden && file.kind === "template" && rule.category === "policy") severity = "info";
-        hits.push({ rule, severity, scope, line: index + 1, excerpt: excerptOf(lineText(a.text, a, index), column) });
+        done.add(index);
+        hits.push({ rule, severity, scope, line: index + 1, excerpt: excerptOf(original.get(index), column) });
       }
     }
   }
@@ -125,7 +180,6 @@ function hiddenNotes(file: SourceFile, a: Analysis, regionAddress: Address[]): F
     const body = a.text.slice(region.start, region.end);
     const severity: Severity = file.kind === "template" || address === "loose" ? "low" : "medium";
     const line = lineIndexAt(a.lineStarts, region.start);
-    const flat = body.replace(/\s+/g, " ").trim();
     out.push({
       rule: "hidden-agent-note",
       category: "hidden-text",
@@ -133,7 +187,7 @@ function hiddenNotes(file: SourceFile, a: Analysis, regionAddress: Address[]): F
       title: "Hidden comment addressed to AI agents (not shown on the rendered page)",
       file: file.path,
       line: line + 1,
-      excerpt: revealInvisible(flat.length > EXCERPT_MAX ? `${flat.slice(0, EXCERPT_MAX)}…` : flat),
+      excerpt: clean(body, EXCERPT_MAX),
       scope: "hidden",
     });
   });
@@ -147,10 +201,9 @@ const INVISIBLE_TITLES = {
   "zero-width-run": "Run of zero-width characters (can encode hidden data)",
 } as const;
 
-function invisibleFindings(file: SourceFile, a: Analysis): Finding[] {
+function invisibleFindings(file: SourceFile, a: Analysis, original: Lines): Finding[] {
   return findInvisible(a.text).map((hit) => {
     const index = lineIndexAt(a.lineStarts, hit.offset);
-    const line = lineText(a.text, a, index);
     return {
       rule: "invisible-unicode",
       category: "hidden-text",
@@ -159,11 +212,16 @@ function invisibleFindings(file: SourceFile, a: Analysis): Finding[] {
       detail: hit.decoded ? `decodes to: ${JSON.stringify(hit.decoded.slice(0, 200))}` : `${hit.length} characters`,
       file: file.path,
       line: index + 1,
-      excerpt: excerptOf(line, hit.offset - a.lineStarts[index]!),
+      excerpt: excerptOf(original.get(index), hit.offset - a.lineStarts[index]!),
       scope: "hidden",
     } satisfies Finding;
   });
 }
+
+const NOTE_TITLES: Record<NonNullable<SourceFile["notes"]>[number], string> = {
+  truncated: "File is larger than the scan limit; only its beginning was scanned",
+  "nul-bytes": "File contains NUL bytes, which make many tools treat it as binary and skip it",
+};
 
 /** One finding per line and category (the most severe), and a cap on repeated policy lines. */
 function dedupe(findings: Finding[]): Finding[] {
@@ -190,11 +248,12 @@ function dedupe(findings: Finding[]): Finding[] {
 export function scanFile(file: SourceFile, options: ScanOptions = {}): Finding[] {
   const ignore = new Set(options.ignore ?? []);
   const a = analyze(file.text, file.path, file.kind === "agent");
+  const original = new Lines(a.text, a);
   const regionAddress = a.hiddenRegions.map((r) => addressOf(a.text.slice(r.start, r.end)));
   const findings: Finding[] = [];
   for (const rule of RULES) {
     if (ignore.has(rule.id)) continue;
-    for (const hit of ruleHits(file, a, rule, regionAddress)) {
+    for (const hit of ruleHits(file, a, rule, regionAddress, original)) {
       findings.push({
         rule: hit.rule.id,
         category: hit.rule.category,
@@ -207,27 +266,46 @@ export function scanFile(file: SourceFile, options: ScanOptions = {}): Finding[]
       });
     }
   }
-  findings.push(...hiddenNotes(file, a, regionAddress), ...invisibleFindings(file, a));
+  findings.push(...hiddenNotes(file, a, regionAddress), ...invisibleFindings(file, a, original));
   for (const c of configFindings({ ...file, text: a.text })) {
-    const line = Math.max(1, c.line);
+    const line = Math.min(Math.max(1, c.line), a.lineStarts.length);
     findings.push({
       ...c,
       file: file.path,
       line,
-      excerpt: c.excerpt ?? excerptOf(lineText(a.text, a, line - 1), 0),
+      excerpt: c.excerpt ?? excerptOf(original.get(line - 1), 0),
       scope: "agent-file",
     });
   }
+  for (const note of file.notes ?? []) {
+    findings.push({ rule: "partial-scan", category: "hidden-text", severity: "medium", title: NOTE_TITLES[note], file: file.path, line: 1, excerpt: excerptOf(original.get(0), 0), scope: "agent-file" });
+  }
   const kept = dedupe(findings.filter((f) => !ignore.has(f.rule)));
-  if (file.url) for (const f of kept) f.url = `${file.url}#L${f.line}`;
+  for (const f of kept) {
+    // Paths and config details come from the repository too.
+    f.file = clean(f.file);
+    if (f.detail !== undefined) f.detail = clean(f.detail);
+    if (file.url) f.url = `${file.url}#L${f.line}`;
+  }
   return kept;
 }
 
+export function scanAll(files: readonly SourceFile[], options: ScanOptions = {}): ScanResult {
+  const findings: Finding[] = [];
+  const unscanned: string[] = [];
+  for (const f of files) {
+    if (options.deadline !== undefined && Date.now() > options.deadline) {
+      unscanned.push(f.path);
+      continue;
+    }
+    findings.push(...scanFile(f, options));
+  }
+  findings.sort((x, y) => severityRank(y.severity) - severityRank(x.severity) || x.file.localeCompare(y.file) || x.line - y.line);
+  return { findings, unscanned };
+}
+
 export function scanFiles(files: readonly SourceFile[], options: ScanOptions = {}): Finding[] {
-  const all = files.flatMap((f) => scanFile(f, options));
-  return all.sort(
-    (x, y) => severityRank(y.severity) - severityRank(x.severity) || x.file.localeCompare(y.file) || x.line - y.line,
-  );
+  return scanAll(files, options).findings;
 }
 
 export function summarize(findings: readonly Finding[]): Record<Severity, number> {

@@ -89,7 +89,7 @@ function fakeGitHub(files: Record<string, string>, options: { truncated?: boolea
   const calls: string[] = [];
   const fetch: Fetcher = async (url, init) => {
     calls.push(`${url} ${init.headers.authorization ?? "-"}`);
-    const json = (status: number, body: unknown) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) });
+    const json = (status: number, body: unknown) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body), arrayBuffer: async () => new TextEncoder().encode(JSON.stringify(body)).buffer as ArrayBuffer });
     if (url === "https://api.github.com/repos/o/r") return json(200, { default_branch: "main" });
     if (url === "https://api.github.com/repos/o/r/commits/main") return json(200, { sha: "c0ffee".padEnd(40, "0") });
     if (url.startsWith("https://api.github.com/repos/o/r/git/trees/")) {
@@ -98,7 +98,11 @@ function fakeGitHub(files: Record<string, string>, options: { truncated?: boolea
     const raw = /^https:\/\/raw\.githubusercontent\.com\/o\/r\/c0ffee0+\/(.+)$/.exec(url);
     if (raw) {
       const body = files[decodeURIComponent(raw[1]!)];
-      return body === undefined ? json(404, {}) : { ok: true, status: 200, json: async () => ({}), text: async () => body };
+      if (body === undefined) return json(404, {});
+      const range = /^bytes=0-(\d+)$/.exec(init.headers.range ?? "");
+      const bytes = new TextEncoder().encode(body);
+      const sent = range ? bytes.subarray(0, Number(range[1]) + 1) : bytes;
+      return { ok: true, status: range ? 206 : 200, json: async () => ({}), text: async () => new TextDecoder().decode(sent), arrayBuffer: async () => sent.slice().buffer as ArrayBuffer };
     }
     return json(404, {});
   };

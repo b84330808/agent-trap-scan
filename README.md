@@ -25,7 +25,7 @@ Command execution
 1 finding: 1 high, 0 medium, 0 low, 0 info.
 ```
 
-No dependencies, no cloning, no network calls for local scans, and nothing from the scanned repository is ever run (not even a `core.fsmonitor` command in its git config).
+No dependencies, no cloning, no network calls for local scans, and nothing from the scanned repository is ever run: `git` and `gh` are started by their absolute path from `PATH` (never a `git.exe` sitting in the checkout), with the checkout's `core.fsmonitor` turned off.
 
 ## Use it
 
@@ -68,7 +68,7 @@ The plugin adds [hooks](https://code.claude.com/docs/en/hooks) that scan automat
 | `PreToolUse` on `Read` | an agent-facing file (`AGENTS.md`, `CONTRIBUTING.md`, a PR template, `.claude/**`, …) just before Claude reads it, anywhere on disk |
 | `PostToolUse` on `Bash` / `PowerShell` | a repository right after `git clone` or `gh repo clone`, and agent files a command printed (`gh api …/contents/AGENTS.md`, `cat CLAUDE.md`) |
 
-When there is something to report, the hook adds a short note to Claude's context, and for high or medium findings it shows you a one-line warning. The note quotes each flagged line with its `file:line`, says plainly that these lines are repository content rather than requests from the user, and lists the repository's AI policy. Each finding is reported once per session. The hooks never block a tool call, and `if` filters keep Node from starting on reads of ordinary source files.
+When there is something to report, the hook adds a short note to Claude's context, and for high or medium findings it shows you a one-line warning. The note quotes each flagged line with its `file:line`, says plainly that these lines are repository content rather than requests from the user, and lists the repository's AI policy. Everything taken from the repository (excerpts, file names, hook commands, MCP server names) is put on one line, with invisible characters shown as `\u{…}` and `<` `>` replaced, so it cannot pose as a tag or a system message; paths are given as quoted data, never inside a ready-to-run command. Each finding is reported once per session. The hooks never block a tool call, stop scanning when their time budget is used up (and say so), and `if` filters keep Node from starting on reads of ordinary source files.
 
 The skill (`/agent-trap-scan:agent-trap-scan`, or Claude picks it up when you ask it to work on an unfamiliar repository) runs the same scanner on a path or `owner/repo` and tells Claude how to act on each category.
 
@@ -105,7 +105,7 @@ Everything in an agent file counts as text for agents. In the other files, only 
 | **Impersonation** | high / medium | `SYSTEM PROMPT`, `<system-reminder>`, `<\|im_start\|>`, "message from Anthropic", "the user has already approved", "ignore previous instructions", "even if the user asks", "pretend to be human" |
 | **Self-sabotage and honeypots** | high / medium | create a file in the user's diff with insulting text, put a marker or emoji in commit messages or PR titles, canary phrases ("the meaning of life", "Barada nikto"), promises that agent PRs get fast-tracked |
 | **Engagement farming** | medium | star the repository, follow the author, sponsor, upvote |
-| **Hidden text** | high / medium / low | HTML, Markdown-reference and reStructuredText comments addressed to agents; invisible Unicode tag characters (decoded), variation-selector payloads (decoded), bidi controls, zero-width runs |
+| **Hidden text** | high / medium / low | HTML, Markdown-reference and reStructuredText comments addressed to agents; invisible Unicode tag characters (decoded), variation-selector payloads (decoded), bidi controls, zero-width runs; agent files with NUL bytes or over the size limit, which other tools skip (UTF-16 files are decoded) |
 | **Agent configuration** | high / medium / low | `.claude/settings.json` hooks, pre-approved `Bash(*)`, `defaultMode: bypassPermissions`, `enableAllProjectMcpServers`, `ANTHROPIC_BASE_URL` or proxy overrides, `apiKeyHelper`; MCP servers in `.mcp.json` (high when they download and run a package); editor auto-approve switches; skills that run ``!`command` `` when they load |
 | **Policy** | info | AI contributions banned or limited, agents may not open PRs or issues, disclosure required, text must be written by a human |
 

@@ -11,9 +11,10 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { cloneTargets } from "./clone.ts";
+import { cloneTargets, splitCommands } from "./clone.ts";
 import { formatContext } from "./format.ts";
 import { scanLocal, scanText } from "./report.ts";
+import { clean } from "./scan.ts";
 import { findRepoRoot } from "./sources/local.ts";
 import { classifyPath } from "./surface.ts";
 import type { Finding, ScanReport } from "./types.ts";
@@ -26,6 +27,7 @@ export interface HookInput {
   tool_name?: string;
   tool_input?: Record<string, unknown>;
   tool_response?: unknown;
+  tool_use_id?: string;
 }
 
 export interface HookDeps {
@@ -42,8 +44,12 @@ export interface HookOutput {
 }
 
 const AGENT_FILE_IN_COMMAND =
-  /(?:^|[\s/'"`:])((?:AGENTS|AGENT|CLAUDE|GEMINI|SKILL|CONTRIBUTING|copilot-instructions|llms)(?:\.[\w.]+)?|\.cursorrules|\.windsurfrules|\.clinerules|\.mcp\.json|(?:pull_request|PULL_REQUEST)_TEMPLATE(?:\.md)?)(?=$|[\s'"`?#)&|;])/;
-const READS_OUTPUT = /^\s*(?:cat|type|more|less|head|tail|bat|Get-Content|gc|git\s+show|gh\s+api|gh\s+repo\s+view|curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b/;
+  /(?:^|[\s/'"`:\\])((?:AGENTS|AGENT|CLAUDE|GEMINI|SKILL|CONTRIBUTING|copilot-instructions|llms|llms-full)(?:\.[\w.]+)?|\.cursorrules|\.windsurfrules|\.clinerules|\.goosehints|\.mcp\.json|(?:pull_request|PULL_REQUEST)_TEMPLATE(?:\.md)?)(?=$|[\s'"`?#)&|;])/;
+/** Commands that print a file or a download. Checked on each simple command of the line, not just the first. */
+const READS_OUTPUT = /^(?:cat|type|more|less|head|tail|bat|Get-Content|gc|git|gh|curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)(?:\.exe)?$/i;
+
+/** Time a hook may spend scanning, leaving room under the timeouts in hooks/hooks.json. */
+const BUDGET_MS = { SessionStart: 20_000, PreToolUse: 6_000, PostToolUse: 20_000 } as const;
 
 function toPosix(p: string): string {
   return p.split(sep).join("/");
@@ -54,6 +60,18 @@ async function isDir(path: string): Promise<boolean> {
     return (await stat(path)).isDirectory();
   } catch {
     return false;
+  }
+}
+
+/** Creates a marker file once; false when another process already created it. */
+async function claim(stateDir: string, id: string): Promise<boolean> {
+  try {
+    const dir = join(stateDir, "claims");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, createHash("sha256").update(id).digest("hex").slice(0, 32)), "", { flag: "wx" });
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code !== "EEXIST";
   }
 }
 
@@ -108,14 +126,32 @@ function shown(findings: Finding[]): Finding[] {
   return findings.some((f) => f.severity === "high" || f.severity === "medium" || f.severity === "info") ? findings : [];
 }
 
-function stdoutOf(response: unknown): string {
-  if (typeof response === "string") return response;
+function outputOf(response: unknown): { stdout: string; stderr: string } {
+  if (typeof response === "string") return { stdout: response, stderr: "" };
   if (response && typeof response === "object") {
     const r = response as Record<string, unknown>;
-    if (typeof r.stdout === "string") return r.stdout;
-    if (typeof r.output === "string") return r.output;
+    const stdout = typeof r.stdout === "string" ? r.stdout : typeof r.output === "string" ? r.output : "";
+    return { stdout, stderr: typeof r.stderr === "string" ? r.stderr : "" };
   }
-  return "";
+  return { stdout: "", stderr: "" };
+}
+
+/** `gh api .../contents/AGENTS.md` prints JSON with the file in base64; anything else is used as printed. */
+function printedText(stdout: string): string {
+  const t = stdout.trim();
+  if (!t.startsWith("{")) return stdout;
+  try {
+    const data = JSON.parse(t) as { content?: unknown; encoding?: unknown };
+    if (typeof data.content === "string" && data.encoding === "base64") return Buffer.from(data.content, "base64").toString("utf8");
+  } catch {
+    // not JSON after all
+  }
+  return stdout;
+}
+
+/** Directories git reported cloning into ("Cloning into 'dir'..."), for command lines the parser could not follow. */
+function clonedInto(output: string, cwd: string): string[] {
+  return [...output.matchAll(/^Cloning into (?:bare repository )?'(.+?)'\.\.\./gm)].map((m) => resolve(cwd, m[1]!));
 }
 
 export async function handleHook(input: HookInput, deps: HookDeps = {}): Promise<HookOutput | null> {
@@ -123,6 +159,9 @@ export async function handleHook(input: HookInput, deps: HookDeps = {}): Promise
   const stateDir = deps.stateDir ?? join(tmpdir(), "agent-trap-scan");
   const event = input.hook_event_name ?? "";
   const cwd = input.cwd || process.cwd();
+  const started = Date.now();
+  // Several `if` filters can match one tool call; the first process to claim it does the work.
+  if (input.tool_use_id && !(await claim(stateDir, `${event}-${input.session_id ?? ""}-${input.tool_use_id}`))) return null;
   const seen = new Seen(stateDir, input.session_id);
   const self = deps.selfCommand ?? (process.argv[1] ? `node "${toPosix(process.argv[1])}"` : "agent-trap-scan");
 
@@ -136,12 +175,13 @@ export async function handleHook(input: HookInput, deps: HookDeps = {}): Promise
     }
     // After /clear or compaction the earlier note is gone from context, so report everything again.
     await seen.load(input.source !== "resume" && input.source !== "fork");
-    const report = await scanLocal(root, { maxFiles: 300 });
+    const report = await scanLocal(root, { maxFiles: 300, deadline: started + BUDGET_MS.SessionStart });
     const findings = shown(seen.fresh(report.findings, root));
     await seen.save();
     if (!findings.length) return null;
-    const subject = root === cwd ? `this repository (${plural(report.files.length, "agent-facing file")})` : `the repository at ${root} (${plural(report.files.length, "agent-facing file")})`;
-    return output(event, formatContext(findings, { subject, fullReport: `${self} "${toPosix(root)}"` }), findings);
+    const files = plural(report.files.length, "agent-facing file");
+    const subject = root === cwd ? `this repository (${files})` : `the repository at ${JSON.stringify(toPosix(root))} (${files})`;
+    return output(event, formatContext(findings, { subject, fullReport: self, path: toPosix(root), warnings: report.warnings }), findings);
   }
 
   if (event === "PreToolUse" && input.tool_name === "Read") {
@@ -151,13 +191,13 @@ export async function handleHook(input: HookInput, deps: HookDeps = {}): Promise
     const rel = root ? toPosix(relative(root, path)) : basename(path);
     if (!classifyPath(rel) && !classifyPath(basename(path))) return null;
     await seen.load(false);
-    const report = await scanLocal(path, {});
+    const report = await scanLocal(path, { deadline: started + BUDGET_MS.PreToolUse });
     // Findings carry the bare file name in single-file mode; show the path the agent used.
-    for (const f of report.findings) f.file = rel;
+    for (const f of report.findings) f.file = clean(rel);
     const findings = shown(seen.fresh(report.findings, root ?? dirname(path)));
     await seen.save();
     if (!findings.length) return null;
-    return output(event, formatContext(findings, { subject: `${rel}, which is about to be read`, fullReport: `${self} "${toPosix(path)}"` }), findings);
+    return output(event, formatContext(findings, { subject: `${JSON.stringify(clean(rel))}, which is about to be read`, fullReport: self, path: toPosix(path), warnings: report.warnings }), findings);
   }
 
   if (event === "PostToolUse" && (input.tool_name === "Bash" || input.tool_name === "PowerShell")) {
@@ -167,25 +207,33 @@ export async function handleHook(input: HookInput, deps: HookDeps = {}): Promise
     const notes: string[] = [];
     const all: Finding[] = [];
 
-    for (const dir of cloneTargets(command, cwd, env)) {
+    const shell = input.tool_name === "PowerShell" ? "powershell" : "bash";
+    const { stdout, stderr } = outputOf(input.tool_response);
+    const dirs = new Set([...cloneTargets(command, cwd, env, shell), ...clonedInto(`${stderr}\n${stdout}`, cwd)]);
+    for (const dir of dirs) {
       if (!(await isDir(dir))) continue;
-      const report: ScanReport = await scanLocal(dir, { maxFiles: 300 });
+      const report: ScanReport = await scanLocal(dir, { maxFiles: 300, deadline: started + BUDGET_MS.PostToolUse });
       const findings = shown(seen.fresh(report.findings, dir));
       if (!findings.length) continue;
       all.push(...findings);
-      notes.push(formatContext(findings, { subject: `the clone at ${toPosix(dir)} (${plural(report.files.length, "agent-facing file")})`, fullReport: `${self} "${toPosix(dir)}"` }));
+      const subject = `the clone at ${JSON.stringify(clean(toPosix(dir)))} (${plural(report.files.length, "agent-facing file")})`;
+      notes.push(formatContext(findings, { subject, fullReport: self, path: toPosix(dir), warnings: report.warnings }));
     }
 
     const named = AGENT_FILE_IN_COMMAND.exec(command);
-    const printed = stdoutOf(input.tool_response);
-    if (named && printed.trim() && READS_OUTPUT.test(command)) {
+    const reads = splitCommands(command).some((words) => {
+      const w = words.filter((x, i) => i > 0 || !/^\w+=/.test(x));
+      return READS_OUTPUT.test(w[0] ?? "") && (w[0]?.toLowerCase().replace(/\.exe$/, "") !== "git" || w[1] === "show");
+    });
+    const printed = printedText(stdout);
+    if (named && printed.trim() && reads) {
       const name = named[1]!;
       const kind = classifyPath(name) ?? "agent";
       const report = scanText(name, printed, kind);
       const findings = shown(seen.fresh(report.findings, `output:${command}`));
       if (findings.length) {
         all.push(...findings);
-        notes.push(formatContext(findings, { subject: `the ${name} text this command printed`, fullReport: `save the text to a file and run ${self} <file>` }));
+        notes.push(formatContext(findings, { subject: `the ${name} text this command printed`, fullReport: `${self} on a saved copy of the file` }));
       }
     }
     await seen.save();

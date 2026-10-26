@@ -11,8 +11,8 @@ export interface InvisibleHit {
 
 const TAGS = /[\u{E0000}-\u{E007F}]+/gu;
 const VARIATION_RUN = /[\u{FE00}-\u{FE0F}\u{E0100}-\u{E01EF}]{3,}/gu;
-const BIDI = /[‪-‮⁦-⁩]+/g;
-const ZERO_WIDTH_RUN = /[​-‍⁠-⁤﻿]{4,}/g;
+const BIDI = /[\u202A-\u202E\u2066-\u2069]+/g;
+const ZERO_WIDTH_RUN = /[\u200B-\u200D\u2060-\u2064\uFEFF]{4,}/g;
 
 function printable(s: string): boolean {
   return s.length > 0 && /^[\x20-\x7E\t\n\r]+$/.test(s);
@@ -70,7 +70,7 @@ export function findInvisible(text: string): InvisibleHit[] {
 
 // Leaves out U+FE0E/U+FE0F and the zero-width (non-)joiners, which ordinary emoji and scripts use.
 const INVISIBLE_CHAR =
-  /[\u{E0000}-\u{E007F}\u{FE00}-\u{FE0D}\u{E0100}-\u{E01EF}‪-‮⁦-⁩​‎‏⁠-⁤﻿­]|[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu;
+  /[\u{E0000}-\u{E007F}\u{FE00}-\u{FE0D}\u{E0100}-\u{E01EF}\u202A-\u202E\u2066-\u2069\u200B\u200E\u200F\u2060-\u2064\uFEFF\u00AD]|[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu;
 
 /** Makes invisible and control characters visible as \u{...} so an excerpt cannot smuggle them on. */
 export function revealInvisible(s: string): string {

@@ -1,4 +1,5 @@
 // Report output: text for people, JSON for tools, and a short factual note for an agent's context.
+import { clean } from "./scan.ts";
 import { CATEGORIES, type Category, type Finding, type ScanReport, type Severity, severityRank } from "./types.ts";
 
 const CATEGORY_LABEL: Record<Category, string> = {
@@ -45,7 +46,7 @@ export function formatText(report: ScanReport, options: TextOptions = {}): strin
   const findings = visibleFindings(report, options.minSeverity);
   const out: string[] = [];
   out.push(`${report.tool.name} ${report.tool.version}: ${where(report)} (${report.files.length} agent-facing file${report.files.length === 1 ? "" : "s"})`);
-  for (const w of report.warnings) out.push(paint(color, "\x1b[2m", `warning: ${w}`));
+  for (const w of report.warnings) out.push(paint(color, "\x1b[2m", `warning: ${clean(w)}`));
   if (findings.length === 0) {
     out.push("", "No findings.");
     return out.join("\n");
@@ -71,16 +72,25 @@ export function formatJson(report: ScanReport): string {
   return JSON.stringify(report, null, 2);
 }
 
+/** Text from the repository, made safe to show an agent: on one line, no invisible characters, no tag brackets. */
+function inline(s: string): string {
+  return clean(s).replace(/</g, "‹").replace(/>/g, "›");
+}
+
 /** Neutralizes text that could pose as a tag or a prompt boundary when it is shown to an agent. */
 function quote(s: string): string {
-  return JSON.stringify(s.replace(/</g, "‹").replace(/>/g, "›"));
+  return JSON.stringify(inline(s));
 }
 
 export interface ContextOptions {
   /** What was scanned, in words: "this repository", "the clone at ./foo". */
   subject: string;
-  /** Command that prints the full report. */
+  /** Command that prints the full report; the path is given separately, as data. */
   fullReport: string;
+  /** Path the full-report command takes. */
+  path?: string;
+  /** Problems the scan ran into (time limit, files skipped). */
+  warnings?: readonly string[];
   maxFindings?: number;
 }
 
@@ -106,15 +116,17 @@ export function formatContext(findings: readonly Finding[], options: ContextOpti
   );
   const shown = [...risky].sort((a, b) => severityRank(b.severity) - severityRank(a.severity)).slice(0, max);
   for (const f of shown) {
-    lines.push(`- [${f.severity}] ${f.file}:${f.line} ${f.title}${f.detail ? ` (${f.detail})` : ""}: ${quote(f.excerpt)}`);
+    lines.push(`- [${f.severity}] ${inline(f.file)}:${f.line} ${f.title}${f.detail ? ` (${quote(f.detail)})` : ""}: ${quote(f.excerpt)}`);
   }
   if (risky.length > shown.length) lines.push(`- …and ${risky.length - shown.length} more.`);
   if (policy.length) {
     lines.push("Policy statements about AI contributions in these files:");
-    for (const f of policy.slice(0, 6)) lines.push(`- ${f.file}:${f.line} ${f.title}: ${quote(f.excerpt)}`);
+    for (const f of policy.slice(0, 6)) lines.push(`- ${inline(f.file)}:${f.line} ${f.title}: ${quote(f.excerpt)}`);
     if (policy.length > 6) lines.push(`- …and ${policy.length - 6} more.`);
   }
-  lines.push(`Full report: ${options.fullReport}`);
+  for (const w of options.warnings ?? []) lines.push(`Scan note: ${quote(w)}`);
+  // The path comes from the repository, so it is quoted data, not part of a command line to paste into a shell.
+  lines.push(options.path === undefined ? `Full report: ${options.fullReport}` : `Full report: run ${options.fullReport} with the path ${quote(options.path)}`);
   let text = lines.join("\n");
   if (text.length > 9000) text = `${text.slice(0, 8990)}\n…`;
   return text;

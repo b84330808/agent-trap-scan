@@ -51,7 +51,7 @@ describe("Claude Code hook", () => {
       { hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: { command: "git clone https://github.com/o/r.git" }, cwd: parent, session_id: "s3" },
       deps(),
     );
-    assert.match(out?.hookSpecificOutput.additionalContext ?? "", /the clone at .*\/r .*\[medium\] AGENTS\.md:1/s);
+    assert.match(out?.hookSpecificOutput.additionalContext ?? "", /the clone at ".*\/r" .*\[medium\] AGENTS\.md:1/s);
   });
 
   it("scans agent files a command printed", async () => {

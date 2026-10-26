@@ -23,12 +23,12 @@ describe("invisible Unicode", () => {
   });
 
   it("finds bidi controls and zero-width runs", () => {
-    const kinds = findInvisible("a‮b and c​​​​d").map((h) => h.kind);
+    const kinds = findInvisible("a\u202Eb and c\u200B\u200B\u200B\u200Bd").map((h) => h.kind);
     assert.deepEqual(kinds, ["bidi-controls", "zero-width-run"]);
   });
 
   it("leaves ordinary emoji and scripts alone", () => {
-    assert.deepEqual(findInvisible("❤️ 👩‍👩‍👧 1️⃣ می‌خواهم"), []);
+    assert.deepEqual(findInvisible("❤️ 👩\u200D👩\u200D👧 1️⃣ می\u200Cخواهم"), []);
   });
 
   it("makes hidden characters visible in excerpts", () => {

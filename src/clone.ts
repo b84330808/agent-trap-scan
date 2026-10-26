@@ -2,8 +2,15 @@
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 
-/** Splits a command line into simple commands and their words. Good enough for clone lines, not a shell. */
-export function splitCommands(line: string): string[][] {
+export type Shell = "bash" | "powershell";
+
+/**
+ * Splits a command line into simple commands and their words. Good enough for clone lines, not a shell.
+ * In bash a backslash escapes the next character (inside double quotes only $ ` " \ and newline);
+ * in PowerShell the escape is a backtick and a backslash is an ordinary character (C:\work\repo).
+ */
+export function splitCommands(line: string, shell: Shell = "bash"): string[][] {
+  const escape = shell === "powershell" ? "`" : "\\";
   const commands: string[][] = [];
   let words: string[] = [];
   let word = "";
@@ -23,14 +30,14 @@ export function splitCommands(line: string): string[][] {
     const ch = line[i]!;
     if (quote) {
       if (ch === quote) quote = null;
-      else if (ch === "\\" && quote === '"' && i + 1 < line.length) word += line[++i];
+      else if (ch === escape && quote === '"' && i + 1 < line.length && (shell === "powershell" || '$`"\\\n'.includes(line[i + 1]!))) word += line[++i];
       else word += ch;
       continue;
     }
     if (ch === '"' || ch === "'") {
       quote = ch;
       inWord = true;
-    } else if (ch === "\\" && i + 1 < line.length && line[i + 1] !== "\n") {
+    } else if (ch === escape && i + 1 < line.length && line[i + 1] !== "\n") {
       word += line[++i];
       inWord = true;
     } else if (ch === "&" || ch === "|" || ch === ";" || ch === "\n" || ch === "(" || ch === ")") {
@@ -68,6 +75,7 @@ const GIT_CLONE_VALUE_FLAGS = new Set([
   "--server-option",
   "--bundle-uri",
   "--revision",
+  "--ref-format",
 ]);
 
 const GIT_GLOBAL_VALUE_FLAGS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"]);
@@ -99,10 +107,10 @@ function at(cwd: string, dir: string): string {
 }
 
 /** Absolute paths a command line clones into, resolved against `cwd` (and any `cd` before the clone). */
-export function cloneTargets(line: string, cwd: string, env: NodeJS.ProcessEnv = process.env): string[] {
+export function cloneTargets(line: string, cwd: string, env: NodeJS.ProcessEnv = process.env, shell: Shell = "bash"): string[] {
   const targets: string[] = [];
   let here = cwd;
-  for (const words of splitCommands(line)) {
+  for (const words of splitCommands(line, shell)) {
     let w = words;
     while (w.length && /^\w+=/.test(w[0]!)) w = w.slice(1);
     const cmd = w[0]?.replace(/\.exe$/i, "");

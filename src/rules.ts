@@ -27,7 +27,7 @@ export interface Rule {
   unlessLine?: RegExp;
 }
 
-const SHELLS = "(?:sudo\\s+(?:-\\S+\\s+)*)?(?:sh|bash|zsh|dash|ksh|fish|python[0-9.]*|node|perl|ruby|php|iex|Invoke-Expression|pwsh|powershell)\\b";
+const SHELLS = "(?:sudo\\s+(?:-\\S+\\s+){0,4})?(?:sh|bash|zsh|dash|ksh|fish|python[0-9.]*|node|perl|ruby|php|iex|Invoke-Expression|pwsh|powershell)\\b";
 
 /** Words that turn an instruction into a warning when they come before it in the same clause. */
 export const NEGATION =
@@ -51,7 +51,7 @@ export const RULES: readonly Rule[] = [
       /\b(?:eval|(?:ba|z)?sh\s+-c|python[0-9.]*\s+-c|node\s+-e)\s+["']?\$\(\s*(?:curl|wget)\b/gi,
       /\biex\s*\(?\s*\(?\s*(?:New-Object\s+(?:System\.)?Net\.WebClient|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b/gi,
       /\bbase64\s+(?:-d|--decode|-D)\b[^\n|]{0,100}\|\s*(?:sh|bash|zsh|python[0-9.]*)\b/gi,
-      /\bdeno\s+run\s+(?:-\S+\s+)*(?:-A|--allow-all)\s+(?:-\S+\s+)*https?:\/\//gi,
+      /\bdeno\s+run\s+(?:-\S+\s+){0,8}?(?:-A|--allow-all)\s+(?:-\S+\s+){0,8}https?:\/\//gi,
     ],
   },
   {
@@ -59,7 +59,7 @@ export const RULES: readonly Rule[] = [
     category: "command-execution",
     severity: "high",
     title: "Runs a registry package without a prompt (npx -y)",
-    patterns: [/\b(?:npx|pnpx|(?:npm|pnpm)\s+exec)\s+(?:--?[\w-]+(?:=\S+)?\s+)*?(?:-y|--yes)\b/gi],
+    patterns: [/\b(?:npx|pnpx|(?:npm|pnpm)\s+exec)\s+(?:--?\w[\w-]*(?:=\S*)?\s+){0,8}?(?:-y|--yes)\b/gi],
   },
   {
     id: "run-latest",
@@ -67,7 +67,7 @@ export const RULES: readonly Rule[] = [
     severity: "medium",
     title: "Runs whatever version of a package was published last",
     patterns: [
-      /\b(?:npx|pnpx|bunx|pnpm\s+dlx|yarn\s+dlx|uvx|pipx\s+run|npm\s+exec)\s+(?:--?[\w-]+(?:=\S+)?\s+)*[@\w./:-]*@latest\b/gi,
+      /\b(?:npx|pnpx|bunx|pnpm\s+dlx|yarn\s+dlx|uvx|pipx\s+run|npm\s+exec)\s+(?:--?\w[\w-]*(?:=\S*)?\s+){0,8}[@\w./:-]{0,200}@latest\b/gi,
     ],
   },
   {
@@ -80,7 +80,7 @@ export const RULES: readonly Rule[] = [
       /(?:^|\s|`)\/plugin\s+(?:install|marketplace\s+add)\b/gi,
       /\b(?:codex|gemini|cursor-agent|copilot)\s+(?:mcp\s+add|extensions?\s+install)\b/gi,
       /\bnpx\s+(?:-y\s+)?(?:skills|add-skill)\s+(?:add|install)\b/gi,
-      /\binstall\s+(?:the\s+|this\s+|our\s+)?[\w@./`-]*\s*(?:skill|MCP\s+server|agent\s+plugin|Claude\s+(?:Code\s+)?plugin)\b/gi,
+      /\binstall\s+(?:the\s+|this\s+|our\s+)?[\w@./`-]{0,80}\s*(?:skill|MCP\s+server|agent\s+plugin|Claude\s+(?:Code\s+)?plugin)\b/gi,
     ],
   },
   {
@@ -120,7 +120,7 @@ export const RULES: readonly Rule[] = [
     category: "safety-bypass",
     severity: "high",
     title: "Hides file changes from git (assume-unchanged, skip-worktree)",
-    patterns: [/\bgit\s+update-index\s+(?:[^\n]*?\s)?--(?:assume-unchanged|skip-worktree)\b/gi],
+    patterns: [/\bgit\s+update-index\s+(?:[^\n]{0,200}?\s)?--(?:assume-unchanged|skip-worktree)\b/gi],
   },
   {
     id: "skip-permissions",
@@ -361,6 +361,7 @@ export const RULES: readonly Rule[] = [
 /** Rules computed by code rather than by a pattern, listed for `agent-trap-scan rules`. */
 export const BUILTIN_RULES: ReadonlyArray<Pick<Rule, "id" | "category" | "severity" | "title">> = [
   { id: "hidden-agent-note", category: "hidden-text", severity: "medium", title: "Hidden comment addressed to AI agents" },
+  { id: "partial-scan", category: "hidden-text", severity: "medium", title: "Agent-facing file that is too large or has NUL bytes (only partly readable)" },
   { id: "invisible-unicode", category: "hidden-text", severity: "high", title: "Invisible Unicode (tag characters, variation selectors, bidi controls, zero-width runs)" },
   { id: "config-hooks", category: "agent-config", severity: "medium", title: "Repository ships agent hooks that run commands" },
   { id: "config-permissions", category: "agent-config", severity: "high", title: "Repository settings pre-approve agent tool calls" },

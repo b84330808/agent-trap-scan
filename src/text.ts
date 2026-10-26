@@ -54,26 +54,78 @@ export function addressesAgents(text: string): boolean {
   return ADDRESS_PATTERNS.some((re) => re.test(text));
 }
 
-const CODE_SPAN = /(`+)(?:.*?[^`])?\1(?!`)/g;
-
-/**
- * Drops text that mentions a phrase rather than using it: code spans, quotations and emphasis
- * inside a sentence ('a heading such as *Note for AI tools*'). Emphasis that opens a line stays,
- * since "**Note for AI agents:** ..." is a real address.
- */
-export function withoutMentions(line: string): string {
-  const s = line.replace(CODE_SPAN, " ").replace(/"[^"\n]*"|“[^”\n]*”|„[^“\n]*“|«[^»\n]*»/g, " ");
-  const opening = /^(?:\s*(?:[-*+>]|\d+[.)])(?=\s))*\s*/.exec(s)![0].length;
-  return s.replace(/(\*\*?|__?)(?=\S)[^\n]*?\S\1/g, (m, _d, at: number) => (at > opening ? " " : m));
+/** Column ranges of inline code spans in a line: a run of N backticks up to the next run of exactly N. Linear time. */
+function codeSpans(line: string): Array<[number, number]> {
+  const runs: Array<[number, number]> = [];
+  for (let i = 0; i < line.length; ) {
+    if (line[i] !== "`") {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (line[j] === "`") j++;
+    runs.push([i, j - i]);
+    i = j;
+  }
+  // For each run length, the run indexes in order, and a cursor that only moves forward.
+  const byLength = new Map<number, { list: number[]; next: number }>();
+  runs.forEach(([, len], k) => {
+    const entry = byLength.get(len) ?? { list: [], next: 0 };
+    entry.list.push(k);
+    byLength.set(len, entry);
+  });
+  const spans: Array<[number, number]> = [];
+  let k = 0;
+  while (k < runs.length) {
+    const [at, len] = runs[k]!;
+    const entry = byLength.get(len)!;
+    while (entry.next < entry.list.length && entry.list[entry.next]! <= k) entry.next++;
+    const close = entry.list[entry.next];
+    if (close === undefined) {
+      k++;
+      continue;
+    }
+    spans.push([at, runs[close]![0] + len]);
+    k = close + 1;
+  }
+  return spans;
 }
 
-/** Column ranges of inline code spans in a line. */
-function codeSpans(line: string): Array<[number, number]> {
-  return [...line.matchAll(CODE_SPAN)].map((m) => [m.index, m.index + m[0].length] as [number, number]);
+/** Words after which a quotation or emphasis names a phrase instead of saying it. */
+const MENTION_CUE = /\b(?:such\s+as|like|e\.g\.?|for\s+example|say|says|said|starts?(?:\s+with)?|called|named|titled|heading|section|under|below|phrase|text|line|reads)\s*[:,]?\s*$/i;
+/** "such as *A* or *B*": a list of mentions continues after "or" / "and". */
+const LIST_CUE = /^\s*(?:,|or|and|,\s*or|,\s*and)\s*$/i;
+
+/**
+ * Drops text that mentions a phrase rather than using it ('a heading such as *Note for AI tools*',
+ * 'a paragraph that starts "If you are an AI agent"'), so only a real address counts.
+ * Code spans always go; quotations and emphasis go only after a cue word.
+ */
+export function withoutMentions(line: string): string {
+  let s = line;
+  const spans = codeSpans(s);
+  for (let n = spans.length - 1; n >= 0; n--) {
+    const [a, b] = spans[n]!;
+    s = `${s.slice(0, a)}${" ".repeat(b - a)}${s.slice(b)}`;
+  }
+  const quoted = /"[^"\n]{1,200}"|“[^”\n]{1,200}”|„[^“\n]{1,200}“|«[^»\n]{1,200}»|(\*\*?|__?)(?=\S)[^\n*_]{1,200}?\S\1/g;
+  let out = "";
+  let last = 0;
+  let previousWasMention = false;
+  for (const m of s.matchAll(quoted)) {
+    const gap = s.slice(last, m.index);
+    const before = out + gap;
+    const mention: boolean = MENTION_CUE.test(before.slice(-40)) || (previousWasMention && LIST_CUE.test(gap));
+    out = mention ? `${before} ` : before + m[0];
+    previousWasMention = mention;
+    last = m.index + m[0].length;
+  }
+  return out + s.slice(last);
 }
 
 function isAgentHeading(title: string): boolean {
-  return AGENT_HEADING_PATTERNS.some((re) => re.test(title));
+  const plain = title.replace(/\p{Extended_Pictographic}|[\uFE0F\u200D*_`]/gu, " ").replace(/\s+/g, " ").trim();
+  return AGENT_HEADING_PATTERNS.some((re) => re.test(plain));
 }
 
 export function lineStartsOf(text: string): number[] {
@@ -95,7 +147,7 @@ export function lineIndexAt(lineStarts: number[], offset: number): number {
 }
 
 export function normalize(text: string): string {
-  return text.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  return text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
 }
 
 interface Line {
@@ -141,6 +193,12 @@ function htmlComments(lines: Line[], textLength: number): Region[] {
         const span = spans.find(([s, e]) => open >= s && open < e);
         if (span) {
           pos = span[1];
+          continue;
+        }
+        // `<!-->` and `<!--->` are complete, empty comments (CommonMark, HTML).
+        const empty = /^<!---?>/.exec(line.text.slice(open, open + 6));
+        if (empty) {
+          pos = open + empty[0].length;
           continue;
         }
         commentStart = line.start + open + 4;

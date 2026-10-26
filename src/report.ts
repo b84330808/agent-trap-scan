@@ -1,6 +1,6 @@
 // Ties a target (a path or a GitHub repository) to a full scan report.
 import { stat } from "node:fs/promises";
-import { scanFiles, summarize, type ScanOptions } from "./scan.ts";
+import { scanAll, summarize, type ScanOptions } from "./scan.ts";
 import { collectGitHub, parseGitHubTarget, type GitHubOptions } from "./sources/github.ts";
 import { collectLocal, type CollectOptions } from "./sources/local.ts";
 import type { ScanReport, SourceFile } from "./types.ts";
@@ -14,8 +14,10 @@ export interface TargetOptions extends ScanOptions, CollectOptions {
   github?: Omit<GitHubOptions, keyof CollectOptions>;
 }
 
-function build(target: string, mode: ScanReport["mode"], files: SourceFile[], warnings: string[], options: ScanOptions, extra: Partial<ScanReport> = {}): ScanReport {
-  const findings = scanFiles(files, options);
+function build(target: string, mode: ScanReport["mode"], files: SourceFile[], warnings: readonly string[], options: ScanOptions, extra: Partial<ScanReport> = {}): ScanReport {
+  const { findings, unscanned } = scanAll(files, options);
+  const allWarnings = [...warnings];
+  if (unscanned.length) allWarnings.push(`time limit reached: ${unscanned.length} of ${files.length} files not scanned`);
   return {
     tool: { name: NAME, version: VERSION },
     target,
@@ -24,7 +26,7 @@ function build(target: string, mode: ScanReport["mode"], files: SourceFile[], wa
     files: files.map((f) => ({ path: f.path, kind: f.kind, bytes: Buffer.byteLength(f.text), ...(f.url ? { url: f.url } : {}) })),
     findings,
     summary: summarize(findings),
-    warnings,
+    warnings: allWarnings,
   };
 }
 

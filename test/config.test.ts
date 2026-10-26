@@ -46,7 +46,7 @@ describe("agent configuration", () => {
     const mcp = f.filter((x) => x.rule === "config-mcp");
     assert.deepEqual(mcp.map((x) => x.severity).sort(), ["high", "low"]);
     // A server that downloads and runs a package is high.
-    assert.ok(mcp.some((x) => x.severity === "high" && x.detail === "npx -y some-mcp@latest"));
+    assert.ok(mcp.some((x) => x.severity === "high" && x.detail === "db: npx -y some-mcp@latest"));
     assert.ok(scan(".mcp.json", { mcpServers: { db: { command: "node", args: ["server.js"] } } }).some((x) => x.severity === "medium"));
     assert.ok(scan(".vscode/mcp.json", { servers: { s: { command: "node", args: ["x.js"] } } }).some((x) => x.rule === "config-mcp"));
   });

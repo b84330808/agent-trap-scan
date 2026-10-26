@@ -4,6 +4,7 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { build } from "esbuild";
+import { AGENT_CONFIG_FILE_PATHS, AGENT_DIR_NAMES, AGENT_FILE_NAMES, GITHUB_AGENT_DIR_NAMES, SHALLOW_AGENT_FILE_NAMES } from "../src/surface.ts";
 import { VERSION } from "../src/version.ts";
 
 const root = join(import.meta.dirname, "..");
@@ -26,44 +27,18 @@ const command = 'node "${CLAUDE_PLUGIN_ROOT}/skills/agent-trap-scan/scripts/agen
 
 // Each `if` filter keeps Node from starting on every Read or shell command; the script checks again.
 // `//**/` anchors at the filesystem root, so files outside the working directory (fresh clones) match too.
-const READ_PATTERNS = [
-  "AGENTS.md",
-  "AGENT.md",
-  "CLAUDE.md",
-  "CLAUDE.local.md",
-  "GEMINI.md",
-  "SKILL.md",
-  "CONTRIBUTING*",
-  "contributing*",
-  "AI_POLICY*",
-  "SECURITY.md",
-  "README*",
-  ".cursorrules",
-  ".windsurfrules",
-  ".clinerules",
-  ".mcp.json",
-  "copilot-instructions.md",
-  "llms.txt",
-  "*_TEMPLATE*",
-  "*_template*",
-  "ISSUE_TEMPLATE/**",
-  ".claude/**",
-  ".cursor/**",
-  ".github/instructions/**",
-];
+// The lists come from src/surface.ts, so the hooks fire for every file the scanner classifies.
+const both = (name: string) => [...new Set([name, name.toLowerCase()])];
+const NAMES = [...AGENT_FILE_NAMES, ...SHALLOW_AGENT_FILE_NAMES].flatMap(both);
+const OTHER_FILES = ["CONTRIBUTING*", "contributing*", "AI_POLICY*", "AI-POLICY*", "ai_policy*", "ai-policy*", "SECURITY.md", "README*", "readme*"];
+const TEMPLATES = ["*_TEMPLATE*", "*_template*", "ISSUE_TEMPLATE/**", "PULL_REQUEST_TEMPLATE/**", "issue_template/**", "merge_request_templates/**", "issue_templates/**"];
+const DIRS = [...AGENT_DIR_NAMES.map((d) => `${d}/**`), ...GITHUB_AGENT_DIR_NAMES.map((d) => `.github/${d}/**`)];
+const READ_PATTERNS = [...new Set([...NAMES, ...OTHER_FILES, ...TEMPLATES, ...DIRS, ...AGENT_CONFIG_FILE_PATHS])];
 const SHELL_PATTERNS = [
   "git clone *",
   "git -C * clone *",
   "gh repo clone *",
-  "*AGENTS.md*",
-  "*CLAUDE.md*",
-  "*GEMINI.md*",
-  "*SKILL.md*",
-  "*CONTRIBUTING*",
-  "*copilot-instructions*",
-  "*.cursorrules*",
-  "*PULL_REQUEST_TEMPLATE*",
-  "*pull_request_template*",
+  ...new Set([...NAMES.map((n) => `*${n}*`), "*CONTRIBUTING*", "*contributing*", "*PULL_REQUEST_TEMPLATE*", "*pull_request_template*"]),
 ];
 
 const handler = (filter: string, timeout: number, statusMessage?: string) => ({
@@ -79,7 +54,7 @@ const hooks = {
   hooks: {
     SessionStart: [
       {
-        matcher: "startup|resume|clear|compact",
+        matcher: "startup|resume|clear|compact|fork",
         hooks: [{ type: "command", command, timeout: 30, statusMessage: "Scanning this repository for agent traps" }],
       },
     ],

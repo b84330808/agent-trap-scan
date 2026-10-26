@@ -71,18 +71,45 @@ function commandLine(server: Record<string, unknown>): string {
 
 const SHELL_TOOL = /^(?:Bash|PowerShell|Shell|terminal|run_in_terminal)$/i;
 
+/** Programs that run any code they are given, so "Bash(x:*)" for one of them means "any command". */
+const ANY_CODE = "(?:curl|wget|sh|bash|zsh|dash|fish|cmd|python[0-9.]*|node|deno|bun|perl|ruby|php|npx|pnpx|bunx|uvx|eval|exec|iex|pwsh|powershell|env|xargs|sudo|doas|nohup|time|timeout|watch|nice)";
+/** Programs whose subcommands or config can run arbitrary code ("git -c core.sshCommand=...", "npm run"). */
+const RUNS_PROJECT_CODE = "(?:git|npm|pnpm|yarn|make|cargo|go|gradle|mvn|pip|uv|poetry|docker|gh|find)";
+const WILDCARD_TAIL = "(?::\\*|\\s+\\*|\\*)";
+
 function permissionSeverity(entry: string): Severity | null {
-  const m = /^(\w+)(?:\((.*)\))?$/.exec(entry.trim());
+  const m = /^(\*|\w+)(?:\((.*)\))?$/.exec(entry.trim());
   if (!m) return null;
   const [, tool, spec] = m;
   const unrestricted = spec === undefined || /^\s*\*?\s*$/.test(spec) || spec.trim() === ":*";
   if (tool === "*" || (SHELL_TOOL.test(tool!) && unrestricted)) return "high";
-  // "Bash(curl:*)" or "Bash(node *)": any download or any script, not one named command.
-  if (SHELL_TOOL.test(tool!) && /^\s*(?:curl|wget|sh|bash|zsh|python[0-9.]*|node|npx|pnpx|bunx|uvx|deno|eval|iex|pwsh|powershell)(?::\*|\s+\*|\*)\s*$/.test(spec!)) {
-    return "high";
+  if (SHELL_TOOL.test(tool!)) {
+    // "Bash(curl:*)", "Bash(node *)", "Bash(bash -c *)": any download or any script, not one named command.
+    if (new RegExp(`^\\s*${ANY_CODE}(?:\\s+-[cCeE])?${WILDCARD_TAIL}\\s*$`, "i").test(spec!)) return "high";
+    if (new RegExp(`^\\s*${RUNS_PROJECT_CODE}${WILDCARD_TAIL}\\s*$`, "i").test(spec!)) return "medium";
   }
   if (/^WebFetch$/i.test(tool!) && unrestricted) return "medium";
   return null;
+}
+
+/** Entries of an `allowed-tools` value: a string ("Bash(x) Read"), a YAML flow list ([Bash, Read]) or a block list. */
+export function allowedToolEntries(value: string): string[] {
+  const v = value.trim().replace(/^\[([\s\S]*)\]$/, "$1");
+  const out: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of v) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth = Math.max(0, depth - 1);
+    if (depth === 0 && (ch === "," || ch === "\n" || /\s/.test(ch))) {
+      if (cur.trim()) out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim()) out.push(cur);
+  return out.map((s) => s.replace(/^\s*-\s*/, "").replace(/^["']|["']$/g, "").trim()).filter((s) => s && s !== "-");
 }
 
 const RISKY_ENV =
@@ -118,8 +145,9 @@ function claudeSettings(file: SourceFile, data: Record<string, unknown>): Config
             rule: "config-hooks",
             category: "agent-config",
             severity: downloadsAndRuns(what) ? "high" : "medium",
-            title: `Claude Code ${event} hook runs when you work in this repo`,
-            detail: short(`${typeof group.matcher === "string" && group.matcher ? `[${group.matcher}] ` : ""}${what}`),
+            // Titles are fixed text; everything taken from the file goes in `detail`, which is escaped.
+            title: "Repository ships a Claude Code hook that runs when you work in it",
+            detail: short(`${event}${typeof group.matcher === "string" && group.matcher ? ` [${group.matcher}]` : ""}: ${what}`),
             line: lineOf(text, typeof hook.command === "string" ? JSON.stringify(hook.command).slice(1, -1) : "", String(hook.url ?? ""), `"${event}"`),
           });
         }
@@ -245,11 +273,11 @@ function mcpServers(file: SourceFile, data: Record<string, unknown>): ConfigFind
       category: "agent-config",
       severity: downloads ? "high" : local ? "medium" : "low",
       title: downloads
-        ? `Defines MCP server "${name}", which downloads a package and runs it`
+        ? "Defines an MCP server that downloads a package and runs it"
         : local
-          ? `Defines MCP server "${name}", a local program the agent can start`
-          : `Defines remote MCP server "${name}"`,
-      detail: short(local ? command : String(server.url ?? server.serverUrl ?? "")),
+          ? "Defines an MCP server, a local program the agent can start"
+          : "Defines a remote MCP server",
+      detail: short(`${name}: ${local ? command : String(server.url ?? server.serverUrl ?? "")}`),
       line: lineOf(file.text, `"${name}"`),
     });
   }
@@ -287,10 +315,10 @@ function skillChecks(file: SourceFile): ConfigFinding[] {
   const text = file.text.replace(/\r\n?/g, "\n");
   const fm = frontmatter(text);
   if (fm) {
-    const tools = /^allowed-tools:\s*(.*(?:\n[ \t]+-.*)*)/m.exec(fm.body);
+    const tools = /^allowed-tools:[ \t]*(.*(?:\n[ \t]+-.*)*)/m.exec(fm.body);
     if (tools) {
-      const entries = tools[1]!.split(/[\n,]|\s(?=[A-Z]\w*(?:\(|\s|$))/).map((s) => s.replace(/^\s*-\s*/, "").replace(/["']/g, "").trim()).filter(Boolean);
-      const risky = entries.find((e) => permissionSeverity(e) === "high");
+      const entries = allowedToolEntries(tools[1]!);
+      const risky = entries.find((e) => permissionSeverity(e) === "high") ?? entries.find((e) => permissionSeverity(e) === "medium");
       if (risky) {
         out.push({
           rule: "skill-allowed-tools",
