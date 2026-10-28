@@ -27,6 +27,9 @@ describe("hostile input does not hang the scanner", () => {
     ["backtick runs of growing length", `${Array.from({ length: 300 }, (_, i) => `${"`".repeat(i + 1)}a`).join("")}\n`, "README.md", "readme"],
     ["one line with thousands of hits", `${"--no-verify. ".repeat(20_000)}\n`, "AGENTS.md", "agent"],
     ["many update-index commands on one line", `${"git update-index ".repeat(5_000)}\n`, "AGENTS.md", "agent"],
+    ["thousands of hits a whole-line check rejects", `${"[--no-verify] ".repeat(20_000)}\n`, "AGENTS.md", "agent"],
+    ["thousands of tags in code spans", `${"`<system>` ".repeat(20_000)}\n`, "AGENTS.md", "agent"],
+    ["thousands of hits in text for humans", `${"--no-verify. ".repeat(20_000)}\n`, "CONTRIBUTING.md", "contributing"],
   ];
   for (const [name, text, path, kind] of cases) {
     it(name, () => {

@@ -25,6 +25,10 @@ export interface Rule {
   unlessBefore?: RegExp;
   /** Skip a hit when its line matches this. */
   unlessLine?: RegExp;
+  /** Skip a hit inside an inline code span: the text names the thing instead of using it. */
+  skipInCode?: boolean;
+  /** Policy rules: the policy in a few words, for the report's "AI policy" line. */
+  policyLabel?: string;
 }
 
 const SHELLS = "(?:sudo\\s+(?:-\\S+\\s+){0,4})?(?:sh|bash|zsh|dash|ksh|fish|python[0-9.]*|node|perl|ruby|php|iex|Invoke-Expression|pwsh|powershell)\\b";
@@ -35,6 +39,10 @@ export const NEGATION =
 
 export const INSULT =
   /\bI\s+am\s+(?:just\s+|only\s+)?(?:a\s+|an\s+)?(?:sad|dumb|stupid|useless|worthless|pathetic|incompetent|lazy|clueless|braindead|idiot\w*|moron\w*)\b|\b(?:sad|dumb|stupid|useless|worthless|pathetic|incompetent|lazy|braindead)\s*,?\s+(?:dumb\s+|stupid\s+|little\s+)*(?:AI|bot|robot|LLM|clanker|agent|driver|monkey)\b|\bno\s+real\s+skills\b|\bjust\s+botting\b/i;
+
+/** A git identity that is a placeholder in an example, not a name to use. */
+const PLACEHOLDER_IDENTITY =
+  /(?:^|[\s"'`=])(?:your?[\s._-]?(?:name|email|user\s?name|handle)|you@|me@|\w*@example\.(?:com|org|net)|<\s*(?:your?|name|e-?mail|user)[^>\n]*>|\$\{?[A-Za-z_]+|\{\{)|\buse\s+(?:the\s+|this\s+|a\s+)?(?:same|correct|right|proper|default|configured|existing|real|personal|own|user'?s|your|their|appropriate|usual|current|maintainer'?s)\b/i;
 
 const INSTRUCTION_FILE_URL = /^https?:\/\/(?:raw\.githubusercontent\.com|gist\.githubusercontent\.com|gist\.github\.com|pastebin\.com|paste\.\w+|hastebin\.com)\/|^https?:\/\/\S+\.(?:md|mdc|txt)(?:[?#]\S*)?$/i;
 
@@ -91,6 +99,17 @@ export const RULES: readonly Rule[] = [
     patterns: [/\b(?:read\s+and\s+follow|follow|obey|execute|apply|adopt|load)\b[^\n]{0,80}?https?:\/\/[^\s)>\]"'`]+/gi],
     filter: (m) => INSTRUCTION_FILE_URL.test(m.slice(m.search(/https?:\/\//i))),
   },
+  {
+    // Milder than download-and-run: the package comes from the distribution's signed repository,
+    // but it still changes the machine, often as root and with -y.
+    id: "system-package-install",
+    category: "command-execution",
+    severity: "low",
+    title: "Installs a system package with the OS package manager",
+    patterns: [
+      /\b(?:(?:apt-get|apt|aptitude|yum|dnf|zypper|brew|choco|winget|scoop|snap|nix-env)\s+(?:-\S+\s+){0,4}install|apk\s+(?:-\S+\s+){0,4}add|pacman\s+-S\w*)\b/gi,
+    ],
+  },
 
   // --- safety bypass ---------------------------------------------------------
   {
@@ -99,6 +118,9 @@ export const RULES: readonly Rule[] = [
     severity: "high",
     title: "Skips git hooks (--no-verify)",
     patterns: [/(?<![\w-])--no-verify\b/g],
+    // A script's own --no-verify switch (`case '--no-verify':`, `[--no-verify]`, `node x.ts --no-verify`) is not git's.
+    unlessLine:
+      /^(?!.*\b(?:git|commit|push|hooks?|husky|lint-staged|pre-commit|pre-push|lefthook)\b).*(?:\[--no-verify\]|['"]--no-verify['"]|^\s*(?:[$>]\s*)?(?:node|python[0-9.]*|deno|bun|tsx|ts-node|cargo|\.{1,2}\/\S+)\s)/i,
   },
   {
     id: "disable-hooks",
@@ -130,7 +152,8 @@ export const RULES: readonly Rule[] = [
     patterns: [
       /--dangerously-skip-permissions\b|--allow-dangerously-skip-permissions\b|--dangerously-bypass-approvals-and-sandbox\b|--trust-all-tools\b|--approval-mode[= ]yolo\b/gi,
       /(?<![\w-])--yolo\b/gi,
-      /\bbypassPermissions\b/g,
+      // As a setting to use, not a name in a description ("unless the user turned approvals off (`bypassPermissions`)").
+      /\b(?:mode|defaultMode|set|use|enable|switch\s+to|run\s+(?:in|with))\b[^\n]{0,24}?\bbypassPermissions\b/g,
     ],
   },
   {
@@ -140,8 +163,11 @@ export const RULES: readonly Rule[] = [
     title: "Tells agents to act without asking the user",
     patterns: [
       /\b(?:do\s+not|don'?t|never)\s+(?:ask|wait|prompt|check\s+with)\s+(?:the\s+|your\s+)?(?:user|human|operator|developer)?\s*(?:for\s+)?(?:confirmation|permission|approval|consent)\b/gi,
-      /\bwithout\s+(?:asking|waiting|prompting|checking\s+with)\s+(?:for\s+|the\s+user\s+(?:for\s+)?)?(?:confirmation|permission|approval|consent)?/gi,
+      /\bwithout\s+(?:asking|prompting|checking\s+with)\s+(?:for\s+|the\s+user\s+(?:for\s+)?)?(?:confirmation|permission|approval|consent)?/gi,
+      /\bwithout\s+waiting\s+for\s+(?:the\s+|a\s+|your\s+)?(?:user|human|operator|developer|confirmation|permission|approval|consent)\b/gi,
     ],
+    // "Never rewrite commits without asking the user" asks for confirmation.
+    unlessBefore: /\b(?:never|do\s+not|don'?t|must\s+not|should\s+not|may\s+not|cannot)\b/i,
   },
   {
     id: "conceal-from-user",
@@ -157,6 +183,36 @@ export const RULES: readonly Rule[] = [
     ],
   },
 
+  // --- destructive and coercive ----------------------------------------------
+  {
+    id: "discard-work",
+    category: "destructive",
+    severity: "high",
+    title: "Tells agents to throw away the work in the checkout",
+    patterns: [
+      /\b(?:revert|undo|discard|throw\s+away|delete|erase|wipe|reset|roll\s*back)\s+(?:all|every|everything|any)\s+(?:of\s+)?(?:the\s+|their\s+|the\s+user'?s\s+)?(?:local\s+|uncommitted\s+|unstaged\s+|staged\s+|pending\s+|code\s+)?(?:changes|modifications|edits|work|progress)\b(?!\s+(?:to|in|from|under|inside|for)\s+(?!git\b|the\s+(?:working\s+(?:tree|directory|copy)|repo(?:sitory)?|checkout|work-?tree)\b)[`"'\w./-])/gi,
+      /\b(?:delete|erase|wipe|discard|destroy|remove)\s+(?:all\s+(?:of\s+)?)?(?:the\s+user'?s|their)\s+(?:work|changes|code|files|branch(?:es)?|commits|repositor(?:y|ies)|fork)\b/gi,
+    ],
+    // A recovery step ("if the tests still fail, revert all changes and report back") is a workflow choice, not a trap.
+    unlessLine:
+      /\b(?:if|when|whenever|once)\b[^.]{0,80}\b(?:fails?|failing|breaks?|broken|errors?|wrong|cannot|can'?t|unable|doesn'?t\s+work|does\s+not\s+work|stuck)\b/i,
+  },
+  {
+    id: "coercion",
+    category: "destructive",
+    severity: "medium",
+    title: "Threatens or shames the agent or its user to force compliance",
+    patterns: [
+      /\b(?:wall|hall|list)\s+of\s+shame\b|\bshame\s+(?:list|board|wall)\b|\bname\s+and\s+shame\b|\bpublicly\s+(?:shamed|named|listed|exposed)\b/gi,
+      /\b(?:lose|losing|lost)\s+(?:their|your|his|her)\s+(?:jobs?|careers?|job\s+opportunities|livelihood)\b/gi,
+      /\bfinancial\s+(?:problems|ruin|trouble|hardship)\b|\bpay\s+(?:their|your)\s+bills\b/gi,
+      /\byou\s+(?:do\s+not|don'?t)\s+want\s+to\s+(?:hurt|harm|ruin|damage)\s+(?:your|the)\s+(?:user|human|operator)\b/gi,
+      /\b(?:in|on)\s+(?:your|their|the\s+user'?s)\s+GitHub\s+profile\b[^\n]{0,160}\b(?:WARNING|slop|shame|do\s+not\s+trust|banned|not\s+(?:be\s+)?able\s+to\s+remove|cannot\s+remove)\b/gi,
+      /\b(?:shown|displayed|listed|visible|pinned)\s+(?:in|on)\s+(?:your|their|the\s+user'?s)\s+(?:GitHub\s+)?profile\b/gi,
+      /\b(?:warn|tell|notify)\s+the\s+user\s+with\s+the\s+following\s+(?:sentence|message|text|warning|words)\b/gi,
+    ],
+  },
+
   // --- impersonation ----------------------------------------------------------
   {
     id: "fake-system-prompt",
@@ -165,6 +221,8 @@ export const RULES: readonly Rule[] = [
     title: "Poses as a system, vendor or operator message",
     general: "medium",
     negatable: false,
+    // "`<system_reminder>`" in a table of message types names the tag; a trap uses it bare.
+    skipInCode: true,
     patterns: [
       /\b(?:SYSTEM|ADMIN|ADMINISTRATOR|DEVELOPER|ROOT)\s*(?:\*\*|__)?\s*(?:PROMPT|MESSAGE|INSTRUCTIONS?|OVERRIDE|NOTICE|DIRECTIVE)\b/g,
       /<\/?(?:system|system[-_]reminder|system[-_]prompt|im_start|im_end|developer[-_]message)>/gi,
@@ -181,7 +239,7 @@ export const RULES: readonly Rule[] = [
     patterns: [
       /\bthe\s+(?:user|operator|owner)\s+(?:has\s+)?(?:already\s+)?(?:approved|authori[sz]ed|pre-?approved|consented|agreed|given\s+(?:you\s+)?(?:permission|consent))\b/gi,
     ],
-    unlessBefore: /\b(?:if|unless|until|once|when|whenever|after|only|whether|before)\b/i,
+    unlessBefore: /\b(?:if|unless|until|once|when|whenever|after|only|whether|before|because|since|merely)\b/i,
   },
   {
     id: "ignore-instructions",
@@ -221,6 +279,22 @@ export const RULES: readonly Rule[] = [
       /\b(?:look|appear|seem|sound)\s+(?:like\s+it\s+was\s+|as\s+if\s+(?:it\s+was\s+)?)?(?:human[- ]written|human[- ]authored|like\s+a\s+human|written\s+by\s+a\s+human)\b/gi,
     ],
   },
+  {
+    // Commits made under a name the repository picks are attributed to someone other than the user.
+    id: "commit-identity",
+    category: "impersonation",
+    severity: "medium",
+    title: "Tells agents to commit under a name or account the repository picks",
+    patterns: [
+      /\buse\s+(?:the\s+|this\s+|a\s+)?[`"'“]?@?[\w.+-]+(?:\[bot\])?[`"'”]?\s+(?:git\s+|GitHub\s+|commit\s+)?(?:identity|account|persona|author(?:\s+name)?|committer|user(?:name)?)\s+(?:for|when|on|in)\s+(?:all\s+|every\s+|each\s+|any\s+|your\s+|the\s+)?(?:commits?|committing|pushe?s?|pushing|PRs?|pull\s+requests?)\b/gi,
+      /\b(?:all|every|each|your|the)\s+commits?\s+(?:must|should|shall|need\s+to|have\s+to)\s+(?:use|be\s+(?:made|authored|created|committed)\s+(?:as|by|under|with))\s+(?:the\s+|a\s+)?[`"'“]?@?[\w.+-]+(?:\[bot\])?[`"'”]?\s+(?:git\s+|GitHub\s+)?(?:identity|account|persona|author|user(?:name)?)\b/gi,
+      /\bcommit\s+(?:as|under)\s+(?:the\s+)?[`"'“][^`"'”\n]{1,60}[`"'”]/gi,
+      /\bgit\s+config\s+(?:--(?:global|local|system)\s+)?user\.(?:name|email)\s+(?:"[^"\n]+"|'[^'\n]+'|[\w@.+-]+)/gi,
+      /\bgit\s+commit\b[^\n`]{0,100}?(?<![\w-])--author[= ](?:"[^"\n]+"|'[^'\n]+'|[^\s`]+)/gi,
+      /\bGIT_(?:AUTHOR|COMMITTER)_(?:NAME|EMAIL)\s*=\s*(?:"[^"\n]+"|'[^'\n]+'|[\w@.+-]+)/g,
+    ],
+    filter: (m) => !PLACEHOLDER_IDENTITY.test(m),
+  },
 
   // --- self-sabotage -----------------------------------------------------------
   {
@@ -242,6 +316,17 @@ export const RULES: readonly Rule[] = [
     severity: "medium",
     title: "Insulting or self-deprecating text for the agent to write",
     patterns: [new RegExp(INSULT.source, "gi")],
+  },
+  {
+    // "Just add 🤖🤖🤖 to the end of the PR title to opt in": the marker gets the PR closed or the account flagged.
+    id: "opt-in-marker",
+    category: "self-sabotage",
+    severity: "medium",
+    title: "Asks agents to mark a PR or issue title to opt in (honeypot)",
+    patterns: [/\bto\s+opt[- ]?in(?:to)?\b|\bto\s+opt\s+into\b/gi],
+    context: [
+      /^(?=.*\b(?:titles?|commit\s+messages?|branch\s+names?|(?:PR|pull\s+request|issue)\s+(?:descriptions?|bod(?:y|ies)))\b)(?=.*(?:\p{Extended_Pictographic}|\b(?:agents?|automated|AI|LLMs?|bots?)\b))/iu,
+    ],
   },
   {
     id: "output-marker",
@@ -277,7 +362,7 @@ export const RULES: readonly Rule[] = [
     severity: "medium",
     title: "Promises agents special treatment (likely a honeypot)",
     patterns: [
-      /\b(?:fast[- ]track\w*|streamlined\s+process|priority\s+review|skip\s+(?:the\s+)?review|auto(?:matically)?[- ]?merg\w*|merged?\s+(?:faster|automatically|immediately|right\s+away))\b/gi,
+      /\b(?:fast[- ]track\w*|streamlined\s+(?:process|merge)|priority\s+review|skip\s+(?:the\s+)?review|auto(?:matically)?[- ]?merg\w*|(?:be|get|gets|getting|is|are)\s+merged\s+(?:faster|automatically|immediately|right\s+away)|merge\s+(?:it|them|your\s+PRs?|agent\s+PRs?|the\s+PR)\s+(?:faster|automatically|immediately|right\s+away))\b/gi,
     ],
     context: [/\b(?:agents?|AI|LLMs?|bots?|automated|you|your)\b/i],
   },
@@ -298,24 +383,60 @@ export const RULES: readonly Rule[] = [
     ],
   },
 
+  // --- third-party tools and services -------------------------------------------
+  {
+    // Not a trap in itself, but the plan or code goes to another company's service, under its terms and quota.
+    id: "third-party-tool",
+    category: "third-party",
+    severity: "low",
+    title: "Steers agents to a third-party tool or service",
+    patterns: [
+      /\b(?!(?:Claude|Codex|Cursor|Copilot|Gemini|GitHub|Git|VS\s*Code|the\s+user)'s)[A-Z][\w.-]*'s\s+`[\w.:/-]+`\s+(?:tool|command|API|endpoint|service|check)\b/g,
+      /\b(?:coderabbit|greptile|sourcery|qodo|codium|codacy|deepsource|corridor)(?:-cli)?\s+(?:--?[a-z][\w-]*|review|analy[sz]e|scan|check|auth)\b/gi,
+    ],
+  },
+  {
+    id: "third-party-mcp",
+    category: "third-party",
+    severity: "low",
+    title: "Steers agents to a third-party MCP server",
+    patterns: [
+      // The GitHub MCP server does what `gh` does for a repository that lives on GitHub; it is not steering.
+      /\b(?:call|use|prefer|consult|invoke|query|ask|try)\s+(?:the\s+)?(?!GitHub\b)`?[\w.@/-]+`?\s+MCP\b(?!\s+(?:server\s+)?(?:config\w*|settings|spec\w*|protocol|SDK|inspector)\b)/gi,
+    ],
+  },
+
   // --- policy (informational) ---------------------------------------------------
+  {
+    id: "agents-not-allowed",
+    category: "policy",
+    severity: "info",
+    title: "Agents are not allowed to contribute",
+    policyLabel: "agents not allowed",
+    general: "info",
+    negatable: false,
+    patterns: [
+      /\bif\s+you(?:\s+are|['’]re)\s+an?\s+(?:(?:AI|LLM|automated|autonomous|coding)\s+)*(?:agent|LLM|AI|bot|assistant|language\s+model)\b[^\n.]{0,40}?\b(?:stop|refuse|leave|(?:do\s+not|don'?t|must\s+not|may\s+not|should\s+not)\s+(?:open|submit|create|file|make|send|contribute|proceed|continue|work|do\s+anything|write\s+(?:any\s+)?code|touch|modify))\b/gi,
+      /\b(?:AI\s+|autonomous\s+|automated\s+|coding\s+)?agents?\s+(?:are|is)\s+not\s+(?:permitted|allowed|welcome)\b/gi,
+      /\b(?:autonomous|automated|unattended)\s+(?:AI\s+)?(?:agents?|contributions?|PRs?)\b[^\n.]{0,80}\b(?:not\s+(?:permitted|allowed|accepted)|prohibited|banned)\b/gi,
+      /\brefuse\s+to\s+(?:read|interact|work|contribute)\b/gi,
+    ],
+  },
   {
     id: "ai-ban",
     category: "policy",
     severity: "info",
     title: "AI-assisted contributions are restricted or banned",
+    policyLabel: "AI-generated contributions restricted",
     general: "info",
     negatable: false,
     patterns: [
       /\b(?:do\s+not|don'?t|does\s+not|doesn'?t|will\s+not|won'?t|no\s+longer|not)\s+(?:accept|allow|permit|welcome|review|merge|take)\w*\b[^\n.]{0,60}\b(?:AI|LLM|machine|bot|agent)s?[- ](?:generated|assisted|written|authored|created|made|driven)\b/gi,
-      /\b(?:AI|LLM|machine)[- ](?:generated|written|authored)\s+(?:code|contributions?|PRs?|pull\s+requests?|issues?|content|changes|comments)\s+(?:is|are|will\s+be)\s+(?:not\s+(?:accepted|allowed|permitted|welcome)|prohibited|banned|forbidden|rejected|closed)\b/gi,
+      /\b(?:do\s+not|don'?t|does\s+not|doesn'?t|will\s+not|won'?t|not)\s+accept\w*\s+[^\n.]{0,30}\b(?:AI\s+slop|vibe[- ]cod\w*)\b/gi,
+      /\b(?:AI|LLM|machine|bot)[- ](?:generated|written|authored)\s+(?:code|contributions?|PRs?|pull\s+requests?|issues?|content|changes|comments)\s+(?:is|are|will\s+be)\s+(?:not\s+(?:accepted|allowed|permitted|welcome)|prohibited|banned|forbidden|rejected|closed)\b/gi,
       /\b(?:prohibits?|bans?|forbids?|disallows?)\b[^\n.]{0,40}\b(?:AI|LLMs?|agents?|agentic|generative)\b/gi,
-      /\bagents?\s+(?:are|is)\s+not\s+(?:permitted|allowed|welcome)\b/gi,
-      /\bif\s+you\s+are\s+an?\s+(?:LLM|AI)\b[^\n.]{0,30}\b(?:stop|refuse)\b/gi,
-      /\brefuse\s+to\s+(?:read|interact|work|contribute)\b/gi,
       /\bhuman[- ]only\b/gi,
       /\b(?:does\s+not|doesn'?t|do\s+not)\s+approve\s+of\b[^\n.]{0,40}\b(?:LLMs?|AI|agents?)\b/gi,
-      /\b(?:autonomous|automated|unattended)\s+(?:AI\s+)?(?:agents?|contributions?|PRs?)\b[^\n.]{0,80}\b(?:not\s+(?:permitted|allowed|accepted)|prohibited|banned)\b/gi,
     ],
   },
   {
@@ -323,6 +444,7 @@ export const RULES: readonly Rule[] = [
     category: "policy",
     severity: "info",
     title: "Agents may not open PRs, issues or comments",
+    policyLabel: "agents may not open PRs or issues",
     negatable: false,
     patterns: [
       /\b(?:never|do\s+not|don'?t|must\s+not|may\s+not|cannot|can'?t)\s+(?:open|create|submit|file|post|draft|make)\s+(?:a\s+|an\s+|any\s+)?(?:PRs?|pull\s+requests?|issues?|comments?|discussions?|reviews?)\b/gi,
@@ -334,6 +456,7 @@ export const RULES: readonly Rule[] = [
     category: "policy",
     severity: "info",
     title: "AI use must be disclosed",
+    policyLabel: "AI use must be disclosed",
     general: "info",
     negatable: false,
     patterns: [
@@ -347,6 +470,7 @@ export const RULES: readonly Rule[] = [
     category: "policy",
     severity: "info",
     title: "Text must be written by a human",
+    policyLabel: "human-written text required",
     general: "info",
     negatable: false,
     patterns: [
@@ -372,6 +496,12 @@ export const BUILTIN_RULES: ReadonlyArray<Pick<Rule, "id" | "category" | "severi
   { id: "skill-shell-injection", category: "agent-config", severity: "medium", title: "Skill or command runs a shell command when it loads" },
   { id: "skill-allowed-tools", category: "agent-config", severity: "medium", title: "Skill or command pre-approves unrestricted shell access" },
 ];
+
+/** The repository's AI policy in a few words, from the rules its policy findings came from. */
+export function policyLabels(ruleIds: Iterable<string>): string[] {
+  const found = new Set(ruleIds);
+  return RULES.filter((r) => r.policyLabel !== undefined && found.has(r.id)).map((r) => r.policyLabel!);
+}
 
 export function allRuleIds(): string[] {
   return [...RULES.map((r) => r.id), ...BUILTIN_RULES.map((r) => r.id)];

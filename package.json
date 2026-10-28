@@ -1,7 +1,7 @@
 {
   "name": "agent-trap-scan",
-  "version": "0.1.0",
-  "description": "Scan a repository for text aimed at AI coding agents (AGENTS.md, CLAUDE.md, .claude/, .cursor/, CONTRIBUTING, templates, hidden comments) and flag the risky parts before your agent reads them: download-and-run commands, hook bypasses, fake system prompts, trap files, engagement farming. CLI and Claude Code plugin.",
+  "version": "0.2.0",
+  "description": "Scan a repository for text aimed at AI coding agents (AGENTS.md, CLAUDE.md, .claude/, .cursor/, CONTRIBUTING, templates, hidden comments) and flag the risky parts before your agent reads them: download-and-run commands, hook bypasses, orders to revert your work, fake system prompts, commit identity overrides, trap files and honeypots, engagement farming. CLI and Claude Code plugin.",
   "keywords": [
     "ai-agents",
     "prompt-injection",

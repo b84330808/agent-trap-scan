@@ -1,5 +1,6 @@
 // Ties a target (a path or a GitHub repository) to a full scan report.
 import { stat } from "node:fs/promises";
+import { policyLabels } from "./rules.ts";
 import { scanAll, summarize, type ScanOptions } from "./scan.ts";
 import { collectGitHub, parseGitHubTarget, type GitHubOptions } from "./sources/github.ts";
 import { collectLocal, type CollectOptions } from "./sources/local.ts";
@@ -26,6 +27,7 @@ function build(target: string, mode: ScanReport["mode"], files: SourceFile[], wa
     files: files.map((f) => ({ path: f.path, kind: f.kind, bytes: Buffer.byteLength(f.text), ...(f.url ? { url: f.url } : {}) })),
     findings,
     summary: summarize(findings),
+    aiPolicy: policyLabels(findings.filter((f) => f.category === "policy").map((f) => f.rule)),
     warnings: allWarnings,
   };
 }

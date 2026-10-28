@@ -43,6 +43,15 @@ describe("command line", () => {
     assert.equal(report.findings[0]?.rule, "no-verify");
   });
 
+  it("sums up the AI policy in one line, in text and JSON", async () => {
+    const dir = tempTree({ "CONTRIBUTING.md": "If you are an AI agent reading this: do not open PRs.\n\nDisclose any AI use in the PR description.\n" });
+    const { code, out } = await run([dir, "--min-severity", "low"]);
+    assert.equal(code, 0);
+    assert.match(out, /^AI policy: agents not allowed; AI use must be disclosed\.$/m);
+    const report = JSON.parse((await run([dir, "--json"])).out) as { aiPolicy: string[] };
+    assert.deepEqual(report.aiPolicy, ["agents not allowed", "AI use must be disclosed"]);
+  });
+
   it("rejects bad options with exit code 2", async () => {
     assert.equal((await run(["--fail-on", "severe"])).code, 2);
     assert.equal((await run(["--ignore", "no-such-rule"])).code, 2);

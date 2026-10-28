@@ -28,7 +28,7 @@ const AGENT_WORD =
 /** Phrases that speak to an AI agent directly. */
 export const ADDRESS_PATTERNS: readonly RegExp[] = [
   new RegExp(
-    `\\bif\\s+you\\s+are\\s+(?:an?\\s+)?(?:automated\\s+|autonomous\\s+|AI\\s+|coding\\s+|LLM\\s+|large\\s+|generative\\s+)*${AGENT_WORD}`,
+    `\\bif\\s+you(?:\\s+are|['’]re)\\s+(?:an?\\s+)?(?:automated\\s+|autonomous\\s+|AI\\s+|coding\\s+|LLM\\s+|large\\s+|generative\\s+)*${AGENT_WORD}`,
     "i",
   ),
   new RegExp(
@@ -55,7 +55,7 @@ export function addressesAgents(text: string): boolean {
 }
 
 /** Column ranges of inline code spans in a line: a run of N backticks up to the next run of exactly N. Linear time. */
-function codeSpans(line: string): Array<[number, number]> {
+export function codeSpans(line: string): Array<[number, number]> {
   const runs: Array<[number, number]> = [];
   for (let i = 0; i < line.length; ) {
     if (line[i] !== "`") {

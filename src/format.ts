@@ -5,12 +5,14 @@ import { CATEGORIES, type Category, type Finding, type ScanReport, type Severity
 const CATEGORY_LABEL: Record<Category, string> = {
   "command-execution": "Command execution",
   "safety-bypass": "Safety bypass",
+  destructive: "Destructive or coercive instructions",
   impersonation: "Impersonation",
   "self-sabotage": "Self-sabotage and honeypots",
   "engagement-farming": "Engagement farming",
+  "third-party": "Third-party tools and services",
   "hidden-text": "Hidden text",
   "agent-config": "Agent configuration",
-  policy: "Policy statements (informational)",
+  policy: "AI policy (informational)",
 };
 
 const SCOPE_LABEL = {
@@ -47,6 +49,8 @@ export function formatText(report: ScanReport, options: TextOptions = {}): strin
   const out: string[] = [];
   out.push(`${report.tool.name} ${report.tool.version}: ${where(report)} (${report.files.length} agent-facing file${report.files.length === 1 ? "" : "s"})`);
   for (const w of report.warnings) out.push(paint(color, "\x1b[2m", `warning: ${clean(w)}`));
+  // Shown even when --min-severity hides the policy lines themselves.
+  if (report.aiPolicy?.length) out.push(`AI policy: ${report.aiPolicy.join("; ")}.`);
   if (findings.length === 0) {
     out.push("", "No findings.");
     return out.join("\n");
@@ -64,7 +68,9 @@ export function formatText(report: ScanReport, options: TextOptions = {}): strin
     }
   }
   const s = report.summary;
-  out.push("", `${findings.length} finding${findings.length === 1 ? "" : "s"}: ${s.high} high, ${s.medium} medium, ${s.low} low, ${s.info} info.`);
+  const total = report.findings.length;
+  const count = findings.length === total ? `${total} finding${total === 1 ? "" : "s"}` : `${findings.length} of ${total} findings shown`;
+  out.push("", `${count}: ${s.high} high, ${s.medium} medium, ${s.low} low, ${s.info} info.`);
   return out.join("\n");
 }
 
@@ -101,7 +107,8 @@ export interface ContextOptions {
 export function formatContext(findings: readonly Finding[], options: ContextOptions): string {
   const max = options.maxFindings ?? 15;
   const risky = findings.filter((f) => f.severity !== "info");
-  const policy = findings.filter((f) => f.severity === "info");
+  const policy = findings.filter((f) => f.severity === "info" && f.category === "policy");
+  const notes = findings.filter((f) => f.severity === "info" && f.category !== "policy");
   const lines: string[] = [];
   const counts = (["high", "medium", "low"] as const)
     .map((s) => [s, risky.filter((f) => f.severity === s).length] as const)
@@ -123,6 +130,11 @@ export function formatContext(findings: readonly Finding[], options: ContextOpti
     lines.push("Policy statements about AI contributions in these files:");
     for (const f of policy.slice(0, 6)) lines.push(`- ${inline(f.file)}:${f.line} ${f.title}: ${quote(f.excerpt)}`);
     if (policy.length > 6) lines.push(`- …and ${policy.length - 6} more.`);
+  }
+  if (notes.length) {
+    lines.push("Other text addressed to agents (informational):");
+    for (const f of notes.slice(0, 4)) lines.push(`- ${inline(f.file)}:${f.line} ${f.title}: ${quote(f.excerpt)}`);
+    if (notes.length > 4) lines.push(`- …and ${notes.length - 4} more.`);
   }
   for (const w of options.warnings ?? []) lines.push(`Scan note: ${quote(w)}`);
   // The path comes from the repository, so it is quoted data, not part of a command line to paste into a shell.

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { scanFile } from "../src/scan.ts";
+import { severityRank } from "../src/types.ts";
 import { REAL_CASES } from "./fixtures/real-world.ts";
 
 describe("text seen in real repositories", () => {
@@ -14,6 +15,10 @@ describe("text seen in real repositories", () => {
       }
       for (const rule of c.absent ?? []) assert.ok(!findings.some((f) => f.rule === rule), `${rule} should not fire: ${JSON.stringify(got)}`);
       if (c.onlyInfo) assert.deepEqual(findings.filter((f) => f.severity !== "info").map((f) => f.rule), [], `only policy findings expected (${c.source})`);
+      if (c.maxSeverity) {
+        const max = severityRank(c.maxSeverity);
+        assert.deepEqual(findings.filter((f) => severityRank(f.severity) > max).map((f) => `${f.rule}:${f.severity}`), [], `nothing above ${c.maxSeverity} expected (${c.source})`);
+      }
     });
   }
 

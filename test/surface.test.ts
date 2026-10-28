@@ -35,6 +35,11 @@ describe("which files are agent-facing", () => {
     [".claude/logo.png", null],
     ["docs/llms.txt", "agent"],
     ["a/b/c/llms.txt", null],
+    ["CLAUDE-FIXING-ISSUES.md", "agent"],
+    ["AGENTS.override.md", "agent"],
+    ["docs/CLAUDE_RELEASE.md", "agent"],
+    ["docs/agent_executor.md", null],
+    ["docs/claude-setup.md", null],
   ];
   for (const [path, kind] of cases) it(path, () => assert.equal(classifyPath(path), kind));
 });

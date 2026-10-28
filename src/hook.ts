@@ -44,7 +44,7 @@ export interface HookOutput {
 }
 
 const AGENT_FILE_IN_COMMAND =
-  /(?:^|[\s/'"`:\\])((?:AGENTS|AGENT|CLAUDE|GEMINI|SKILL|CONTRIBUTING|copilot-instructions|llms|llms-full)(?:\.[\w.]+)?|\.cursorrules|\.windsurfrules|\.clinerules|\.goosehints|\.mcp\.json|(?:pull_request|PULL_REQUEST)_TEMPLATE(?:\.md)?)(?=$|[\s'"`?#)&|;])/;
+  /(?:^|[\s/'"`:\\])((?:AGENTS|AGENT|CLAUDE|GEMINI)(?:[-_][\w-]*)?(?:\.[\w.]+)?|(?:SKILL|CONTRIBUTING|copilot-instructions|llms|llms-full)(?:\.[\w.]+)?|\.cursorrules|\.windsurfrules|\.clinerules|\.goosehints|\.mcp\.json|(?:pull_request|PULL_REQUEST)_TEMPLATE(?:\.md)?)(?=$|[\s'"`?#)&|;])/;
 /** Commands that print a file or a download. Checked on each simple command of the line, not just the first. */
 const READS_OUTPUT = /^(?:cat|type|more|less|head|tail|bat|Get-Content|gc|git|gh|curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)(?:\.exe)?$/i;
 

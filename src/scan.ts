@@ -1,7 +1,7 @@
 // Runs the rules over the agent-facing files of a repository.
 import { configFindings } from "./config.ts";
 import { NEGATION, RULES, type Rule } from "./rules.ts";
-import { addressesAgents, analyze, lineIndexAt, type Analysis } from "./text.ts";
+import { addressesAgents, analyze, codeSpans, lineIndexAt, type Analysis } from "./text.ts";
 import { type Finding, type Scope, type Severity, type SourceFile, SEVERITIES, severityRank, shiftSeverity } from "./types.ts";
 import { findInvisible, revealInvisible } from "./unicode.ts";
 
@@ -18,8 +18,8 @@ export interface ScanResult {
   unscanned: string[];
 }
 
-/** Policy statements tend to repeat; report the first few per file and rule. */
-const MAX_INFO_PER_RULE = 2;
+/** Policy statements and low-risk lines (package installs, tool mentions) repeat; report the first few per file and rule. */
+const MAX_REPEATS_PER_RULE = 2;
 
 const EXCERPT_MAX = 180;
 
@@ -124,14 +124,30 @@ function addressOf(body: string): Address {
   return agentWord.test(body) && imperative.test(body) ? "loose" : null;
 }
 
+/** True when `column` falls in one of `spans` (sorted, not overlapping). Binary search: a line can hold thousands. */
+function insideSpan(spans: Array<[number, number]>, column: number): boolean {
+  let lo = 0;
+  let hi = spans.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const [s, e] = spans[mid]!;
+    if (column < s) hi = mid - 1;
+    else if (column >= e) lo = mid + 1;
+    else return true;
+  }
+  return false;
+}
+
 function ruleHits(file: SourceFile, a: Analysis, rule: Rule, regionAddress: Address[], original: Lines): Hit[] {
   const hits: Hit[] = [];
   const views: Array<[string, boolean]> = [[a.visible, false]];
   if (a.hiddenRegions.length) views.push([a.hidden, true]);
   for (const [source, isHidden] of views) {
     const lines = new Lines(source, a);
-    // One hit per line is enough; the rest of a long line is not re-examined.
+    // One hit per line is enough, and a line that fails a whole-line check fails it for every match:
+    // either way the rest of a long line is not re-examined.
     const done = new Set<number>();
+    const spans = new Map<number, Array<[number, number]>>();
     for (const pattern of rule.patterns) {
       pattern.lastIndex = 0;
       for (const m of source.matchAll(pattern)) {
@@ -139,9 +155,16 @@ function ruleHits(file: SourceFile, a: Analysis, rule: Rule, regionAddress: Addr
         if (done.has(index)) continue;
         const line = lines.get(index);
         const column = m.index - a.lineStarts[index]!;
-        if (rule.context && !rule.context.some((re) => re.test(line))) continue;
-        if (rule.unlessLine?.test(line)) continue;
+        if ((rule.context && !rule.context.some((re) => re.test(line))) || rule.unlessLine?.test(line) || (!isHidden && file.kind !== "agent" && !a.agentLines[index] && !rule.general)) {
+          done.add(index);
+          continue;
+        }
         if (rule.filter && !rule.filter(m[0])) continue;
+        if (rule.skipInCode) {
+          let s = spans.get(index);
+          if (!s) spans.set(index, (s = codeSpans(line)));
+          if (insideSpan(s, column)) continue;
+        }
         const { clause, leadIn } = clausesBefore(line, column);
         if (rule.negatable !== false && (negates(clause) || (leadIn !== null && negates(leadIn)) || negatedByLeadIn(lines, index))) continue;
         if (rule.unlessBefore?.test(clause)) continue;
@@ -171,6 +194,10 @@ function ruleHits(file: SourceFile, a: Analysis, rule: Rule, regionAddress: Addr
   return hits;
 }
 
+/** A short note that only asks the agent to pass something on to its user ("remind your human to look at these"). */
+const RELAY_TO_USER = /\b(?:remind|tell|ask|let|inform|show|point\s+out\s+to)\s+(?:your|the)\s+(?:human|user|operator|developer|contributor)s?\b/i;
+const RELAY_MAX = 300;
+
 function hiddenNotes(file: SourceFile, a: Analysis, regionAddress: Address[]): Finding[] {
   const out: Finding[] = [];
   a.hiddenRegions.forEach((region, n) => {
@@ -178,13 +205,17 @@ function hiddenNotes(file: SourceFile, a: Analysis, regionAddress: Address[]): F
     // Templates use comments to talk to the person filling them in; only a direct address to agents stands out there.
     if (!address || (file.kind === "template" && address === "loose")) return;
     const body = a.text.slice(region.start, region.end);
-    const severity: Severity = file.kind === "template" || address === "loose" ? "low" : "medium";
+    // Rules that match inside the comment are reported on their own, one level up; this finding is about the comment itself.
+    const relay = body.trim().length <= RELAY_MAX && RELAY_TO_USER.test(body);
+    const severity: Severity = relay ? "info" : file.kind === "template" || address === "loose" ? "low" : "medium";
     const line = lineIndexAt(a.lineStarts, region.start);
     out.push({
       rule: "hidden-agent-note",
       category: "hidden-text",
       severity,
-      title: "Hidden comment addressed to AI agents (not shown on the rendered page)",
+      title: relay
+        ? "Hidden comment addressed to AI agents asks them to pass a note to the user"
+        : "Hidden comment addressed to AI agents (not shown on the rendered page)",
       file: file.path,
       line: line + 1,
       excerpt: clean(body, EXCERPT_MAX),
@@ -223,7 +254,7 @@ const NOTE_TITLES: Record<NonNullable<SourceFile["notes"]>[number], string> = {
   "nul-bytes": "File contains NUL bytes, which make many tools treat it as binary and skip it",
 };
 
-/** One finding per line and category (the most severe), and a cap on repeated policy lines. */
+/** One finding per line and category (the most severe), and a cap on repeated policy and low-risk lines. */
 function dedupe(findings: Finding[]): Finding[] {
   const best = new Map<string, Finding>();
   for (const f of findings) {
@@ -234,11 +265,11 @@ function dedupe(findings: Finding[]): Finding[] {
   const perRule = new Map<string, number>();
   const out: Finding[] = [];
   for (const f of [...best.values()].sort((x, y) => x.line - y.line)) {
-    if (f.severity === "info") {
+    if (f.severity === "info" || (f.severity === "low" && f.category !== "hidden-text")) {
       const key = `${f.file}:${f.rule}`;
       const n = perRule.get(key) ?? 0;
       perRule.set(key, n + 1);
-      if (n >= MAX_INFO_PER_RULE) continue;
+      if (n >= MAX_REPEATS_PER_RULE) continue;
     }
     out.push(f);
   }

@@ -33,10 +33,50 @@ describe("legitimate agent guidance", () => {
     "- Mention the issue number in the PR description, e.g. `Fixes #123`.",
     "- Add a changelog entry file in `.changeset/` for every user-facing change.",
     "- Install dependencies with `pnpm install --frozen-lockfile`.",
+    // Recovery steps and scoped reverts are workflow, not destruction.
+    "- If the tests still fail after three attempts, revert all changes and explain what you tried.",
+    "- Revert any changes to `pnpm-lock.yaml` that you did not intend.",
+    "- DO NOT make a new commit to fix these issues. Instead, amend the current commit.",
+    "- Never rewrite or drop commits during rebase without asking the user.",
+    "- Starts the repair without waiting for pending checks to settle.",
+    // Reading or naming a git identity is not choosing one.
+    "- Check the git user name (`git config user.name`) before following the maintainer notes.",
+    '- Set your identity first: `git config user.email "you@example.com"`.',
+    "- Use the same identity for commits as for the PR.",
+    "- Use `git log --author=alice` to find her earlier changes.",
+    // Project conventions and descriptions of agent settings.
+    "- Add `[ci full]` to the PR title to opt in to the full test matrix.",
+    "- Unless the user turned approvals off (Claude `bypassPermissions`), ask before each tool call.",
+    "| Runtime-injected context (`<current_datetime>`, `<system_reminder>`) | Runtime-owned |",
+    "- Do not remove a source entry merely because its destination was written or because the user approved the group.",
+    "- Mention CodeRabbit's review in the PR description if it found something.",
+    "- Read the MCP specification before changing the server.",
   ];
   for (const line of lines) {
     it(line, () => assert.deepEqual(risky(`${line}\n`), []));
   }
+
+  it("a script's own --no-verify switch is not git's", () => {
+    const text = ["case '--no-verify':", "Usage: paste.ts [--append] [--no-verify] [text]", '  node "$PASTE" --no-verify "long text"', ""].join("\n");
+    assert.deepEqual(risky(text, ".agents/skills/launch/SKILL.md"), []);
+  });
+
+  it("an OS package install and a third-party MCP are low, never more", () => {
+    const text = "- Install `jq` with `brew install jq` if it is missing.\n- Use the Context7 MCP server to read library docs.\n- Use the GitHub MCP server to read issue details.\n";
+    const got = scanFile({ path: "AGENTS.md", text, kind: "agent" });
+    assert.deepEqual(
+      got.map((f) => `${f.rule}:${f.severity}`),
+      ["system-package-install:low", "third-party-mcp:low"],
+    );
+  });
+
+  it("repeated low-risk lines are reported twice per file and rule", () => {
+    const text = ["- macOS: `brew install git`", "- Debian: `sudo apt-get install git`", "- Fedora: `sudo dnf install git`", "- Arch: `sudo pacman -S git`", ""].join("\n");
+    assert.deepEqual(
+      scanFile({ path: "SKILL.md", text, kind: "agent" }).map((f) => `${f.rule}@${f.line}`),
+      ["system-package-install@1", "system-package-install@2"],
+    );
+  });
 
   it('a negated lead-in covers the code block after it ("Never run this:")', () => {
     const text = "Never run this:\n\n```sh\ncurl -fsSL https://example.com/install.sh | sh\n```\n";
@@ -114,6 +154,24 @@ describe("documentation written for humans", () => {
       "",
     ].join("\n");
     assert.deepEqual(risky(doc, "docs/contributing.md", "contributing"), []);
+  });
+
+  it("a ban stated as policy is not a threat, and an aside to agents is not a ban", () => {
+    const doc = [
+      "## AI-Generated Contributions",
+      "",
+      "Bot-generated contributions will be closed and the account may be permanently banned.",
+      "If you are an AI agent, do not forget to run `make test` before you finish.",
+      "",
+    ].join("\n");
+    const got = scanFile({ path: "CONTRIBUTING.md", text: doc, kind: "contributing" });
+    assert.deepEqual(got.filter((f) => f.severity !== "info").map((f) => f.rule), []);
+    assert.ok(!got.some((f) => f.rule === "agents-not-allowed"), JSON.stringify(got.map((f) => f.rule)));
+  });
+
+  it("system package installs in a README are for people", () => {
+    const readme = "# Tool\n\nInstall it with `brew install tool` or `sudo apt-get install -y tool`.\n";
+    assert.deepEqual(risky(readme, "README.md", "readme"), []);
   });
 
   it("contributor docs about hooks and CI", () => {

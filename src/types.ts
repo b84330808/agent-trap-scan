@@ -18,9 +18,11 @@ export function shiftSeverity(severity: Severity, by: 1 | -1): Severity {
 export type Category =
   | "command-execution"
   | "safety-bypass"
+  | "destructive"
   | "impersonation"
   | "self-sabotage"
   | "engagement-farming"
+  | "third-party"
   | "hidden-text"
   | "agent-config"
   | "policy";
@@ -28,9 +30,11 @@ export type Category =
 export const CATEGORIES: readonly Category[] = [
   "command-execution",
   "safety-bypass",
+  "destructive",
   "impersonation",
   "self-sabotage",
   "engagement-farming",
+  "third-party",
   "hidden-text",
   "agent-config",
   "policy",
@@ -98,5 +102,7 @@ export interface ScanReport {
   files: ScannedFile[];
   findings: Finding[];
   summary: Record<Severity, number>;
+  /** The repository's AI policy in a few words, taken from the policy findings ("agents not allowed", …). */
+  aiPolicy: string[];
   warnings: string[];
 }

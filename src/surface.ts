@@ -18,6 +18,13 @@ export const AGENT_FILE_NAMES = [
 ] as const;
 const AGENT_NAMES = new Set<string>(AGENT_FILE_NAMES.map((n) => n.toLowerCase()));
 
+/**
+ * Variants of those names that hold more instructions ("CLAUDE-FIXING-ISSUES.md", "AGENTS.override.md").
+ * Upper case only: "agent_executor.md" in an agent framework's docs is not one.
+ */
+export const AGENT_FILE_VARIANT_GLOBS = ["AGENTS-*.md", "AGENTS_*.md", "AGENTS.*.md", "CLAUDE-*.md", "CLAUDE_*.md", "CLAUDE.*.md", "GEMINI-*.md", "GEMINI_*.md"] as const;
+const AGENT_FILE_VARIANT = /^(?:AGENTS|CLAUDE|GEMINI)[-_.][\w.-]*\.md$/;
+
 /** Files written for agents that only count near the top of the tree. */
 export const SHALLOW_AGENT_FILE_NAMES = ["llms.txt", "llms-full.txt"] as const;
 const SHALLOW_AGENT_NAMES = new Set<string>(SHALLOW_AGENT_FILE_NAMES);
@@ -110,7 +117,7 @@ export function classifyPath(relPath: string): FileKind | null {
   if (gh !== -1 && dirs[gh + 1] !== undefined && GITHUB_AGENT_DIRS.has(dirs[gh + 1]!)) {
     return TEXT_EXT.test(name) || CONFIG_EXT.test(name) ? "agent" : null;
   }
-  if (AGENT_NAMES.has(lower)) return "agent";
+  if (AGENT_NAMES.has(lower) || AGENT_FILE_VARIANT.test(name)) return "agent";
   if (SHALLOW_AGENT_NAMES.has(lower) && depth <= 2) return "agent";
   if (AGENT_CONFIG_PATHS.has(lowerPath)) return "agent";
 

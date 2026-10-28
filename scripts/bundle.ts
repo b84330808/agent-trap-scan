@@ -4,7 +4,7 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { build } from "esbuild";
-import { AGENT_CONFIG_FILE_PATHS, AGENT_DIR_NAMES, AGENT_FILE_NAMES, GITHUB_AGENT_DIR_NAMES, SHALLOW_AGENT_FILE_NAMES } from "../src/surface.ts";
+import { AGENT_CONFIG_FILE_PATHS, AGENT_DIR_NAMES, AGENT_FILE_NAMES, AGENT_FILE_VARIANT_GLOBS, GITHUB_AGENT_DIR_NAMES, SHALLOW_AGENT_FILE_NAMES } from "../src/surface.ts";
 import { VERSION } from "../src/version.ts";
 
 const root = join(import.meta.dirname, "..");
@@ -33,12 +33,12 @@ const NAMES = [...AGENT_FILE_NAMES, ...SHALLOW_AGENT_FILE_NAMES].flatMap(both);
 const OTHER_FILES = ["CONTRIBUTING*", "contributing*", "AI_POLICY*", "AI-POLICY*", "ai_policy*", "ai-policy*", "SECURITY.md", "README*", "readme*"];
 const TEMPLATES = ["*_TEMPLATE*", "*_template*", "ISSUE_TEMPLATE/**", "PULL_REQUEST_TEMPLATE/**", "issue_template/**", "merge_request_templates/**", "issue_templates/**"];
 const DIRS = [...AGENT_DIR_NAMES.map((d) => `${d}/**`), ...GITHUB_AGENT_DIR_NAMES.map((d) => `.github/${d}/**`)];
-const READ_PATTERNS = [...new Set([...NAMES, ...OTHER_FILES, ...TEMPLATES, ...DIRS, ...AGENT_CONFIG_FILE_PATHS])];
+const READ_PATTERNS = [...new Set([...NAMES, ...AGENT_FILE_VARIANT_GLOBS, ...OTHER_FILES, ...TEMPLATES, ...DIRS, ...AGENT_CONFIG_FILE_PATHS])];
 const SHELL_PATTERNS = [
   "git clone *",
   "git -C * clone *",
   "gh repo clone *",
-  ...new Set([...NAMES.map((n) => `*${n}*`), "*CONTRIBUTING*", "*contributing*", "*PULL_REQUEST_TEMPLATE*", "*pull_request_template*"]),
+  ...new Set([...NAMES.map((n) => `*${n}*`), ...AGENT_FILE_VARIANT_GLOBS.map((g) => `*${g}*`), "*CONTRIBUTING*", "*contributing*", "*PULL_REQUEST_TEMPLATE*", "*pull_request_template*"]),
 ];
 
 const handler = (filter: string, timeout: number, statusMessage?: string) => ({
